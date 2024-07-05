@@ -1,2 +1,3 @@
 [esp-wifi]
 scan_method = 1
+heap_size = 98304

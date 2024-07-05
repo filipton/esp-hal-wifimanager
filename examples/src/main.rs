@@ -33,12 +33,12 @@ use static_cell::make_static;
 const WIFI_SSID: &'static str = env!("SSID");
 const WIFI_PSK: &'static str = env!("PSK");
 
-const RX_BUFFER_SIZE: usize = 16384;
-const TX_BUFFER_SIZE: usize = 16384;
-static mut TX_BUFF: [u8; TX_BUFFER_SIZE] = [0; TX_BUFFER_SIZE];
-static mut RX_BUFF: [u8; RX_BUFFER_SIZE] = [0; RX_BUFFER_SIZE];
+//const RX_BUFFER_SIZE: usize = 16384;
+//const TX_BUFFER_SIZE: usize = 16384;
+//static mut TX_BUFF: [u8; TX_BUFFER_SIZE] = [0; TX_BUFFER_SIZE];
+//static mut RX_BUFF: [u8; RX_BUFFER_SIZE] = [0; RX_BUFFER_SIZE];
 
-static WIFI_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
+//static WIFI_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
 
 #[main]
 async fn main(spawner: Spawner) {
@@ -64,6 +64,59 @@ async fn main(spawner: Spawner) {
 
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
+
+    let mut wifi = peripherals.WIFI;
+    let (wifi_interface, mut controller) =
+        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
+
+    let config = Config::dhcpv4(Default::default());
+    let seed = 69420;
+
+    let stack = &*make_static!(Stack::new(
+        wifi_interface,
+        config,
+        make_static!(StackResources::<3>::new()),
+        seed,
+    ));
+    let client_config = Configuration::Client(ClientConfiguration {
+        ssid: WIFI_SSID.try_into().expect("Wifi ssid parse"),
+        password: WIFI_PSK.try_into().expect("Wifi psk parse"),
+        ..Default::default()
+    });
+    controller.set_configuration(&client_config).unwrap();
+    log::info!("Starting wifi");
+    controller.start().await.unwrap();
+    log::info!("Wifi started!");
+
+    log::info!("About to connect...");
+    let start_time = embassy_time::Instant::now();
+    loop {
+        if start_time.elapsed().as_secs() > 15 {
+            log::warn!("Connect timeout!");
+            break;
+        }
+
+        match with_timeout(Duration::from_secs(15), controller.connect()).await {
+            Ok(res) => match res {
+                Ok(_) => {
+                    log::info!("Wifi connected!");
+                    break;
+                }
+                Err(e) => {
+                    log::info!("Failed to connect to wifi: {e:?}");
+                }
+            },
+            Err(_) => {
+                log::warn!("Connect timeout.1");
+                break;
+            }
+        }
+    }
+
+    spawner
+        .spawn(connection(controller, stack))
+        .expect("connection spawn");
+    spawner.spawn(net_task(stack)).expect("net task spawn");
 
     let mut bluetooth = peripherals.BT;
     loop {
@@ -138,11 +191,13 @@ async fn main(spawner: Spawner) {
                     if let WorkResult::GotDisconnected = res {
                         break;
                     }
-                },
+                }
                 Err(e) => {
                     log::error!("err: {e:?}");
                 }
             }
+
+            Timer::after_millis(10).await;
         }
     }
 
@@ -379,21 +434,11 @@ async fn connection(
     log::info!("start connection task");
     log::info!("Device capabilities: {:?}", controller.get_capabilities());
     loop {
-        /*
-        if WIFI_SIG.signaled() {
-            log::warn!("Signaled: {:?}", WIFI_SIG.wait().await);
-            break;
-        }
-        */
-
         if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
-            // log::info!("w8");
             // wait until we're no longer connected
-            //controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            Timer::after(Duration::from_millis(100)).await;
-            continue;
+            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+            Timer::after(Duration::from_millis(5000)).await
         }
-
         if !matches!(controller.is_started(), Ok(true)) {
             let client_config = Configuration::Client(ClientConfiguration {
                 ssid: WIFI_SSID.try_into().expect("Wifi ssid parse"),
@@ -413,6 +458,15 @@ async fn connection(
 
                 loop {
                     if stack.is_link_up() {
+                        break;
+                    }
+                    Timer::after(Duration::from_millis(500)).await;
+                }
+
+                log::info!("Waiting to get IP address...");
+                loop {
+                    if let Some(config) = stack.config_v4() {
+                        log::info!("Got IP: {}", config.address);
                         break;
                     }
                     Timer::after(Duration::from_millis(500)).await;

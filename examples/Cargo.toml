@@ -22,6 +22,7 @@ embassy-sync = "0.6.0"
 embassy-futures = "0.1.1"
 heapless = { version = "0.8.0", default-features = false }
 bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
+esp-alloc = { version = "0.4.0", features = ["nightly"] }
 
 [build-dependencies]
 dotenvy = "0.15.7"
