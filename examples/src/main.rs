@@ -6,8 +6,10 @@ use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
     },
-    attribute_server::{AttributeServer, NotificationData, WorkResult},
-    gatt, Ble, HciConnector,
+    async_attribute_server::AttributeServer,
+    asynch::Ble,
+    attribute_server::WorkResult,
+    gatt,
 };
 use embassy_executor::Spawner;
 use embassy_net::{
@@ -22,7 +24,7 @@ use esp_hal::{
     system::SystemControl, timer::timg::TimerGroup,
 };
 use esp_wifi::{
-    ble::controller::BleConnector,
+    ble::controller::asynch::BleConnector,
     wifi::{
         AccessPointConfiguration, ClientConfiguration, Configuration, WifiApDevice, WifiController,
         WifiDevice, WifiEvent, WifiStaDevice, WifiState,
@@ -119,13 +121,11 @@ async fn main(spawner: Spawner) {
     spawner.spawn(net_task(stack)).expect("net task spawn");
 
     let mut bluetooth = peripherals.BT;
+    let connector = BleConnector::new(&init, &mut bluetooth);
+    let mut ble = Ble::new(connector, esp_wifi::current_millis);
     loop {
-        let connector = BleConnector::new(&init, &mut bluetooth);
-        let hci = HciConnector::new(connector, esp_wifi::current_millis);
-        let mut ble = Ble::new(&hci);
-
-        log::info!("{:?}", ble.init());
-        log::info!("{:?}", ble.cmd_set_le_advertising_parameters());
+        log::info!("{:?}", ble.init().await);
+        log::info!("{:?}", ble.cmd_set_le_advertising_parameters().await);
         log::info!(
             "{:?}",
             ble.cmd_set_le_advertising_data(
@@ -136,8 +136,9 @@ async fn main(spawner: Spawner) {
                 ])
                 .unwrap()
             )
+            .await
         );
-        log::info!("{:?}", ble.cmd_set_le_advertise_enable(true));
+        log::info!("{:?}", ble.cmd_set_le_advertise_enable(true).await);
 
         log::info!("started advertising");
 
@@ -186,7 +187,7 @@ async fn main(spawner: Spawner) {
         let mut rng = bleps::no_rng::NoRng;
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
         loop {
-            match srv.do_work() {
+            match srv.do_work().await {
                 Ok(res) => {
                     if let WorkResult::GotDisconnected = res {
                         break;
@@ -197,7 +198,7 @@ async fn main(spawner: Spawner) {
                 }
             }
 
-            Timer::after_millis(10).await;
+            Timer::after_millis(100).await;
         }
     }
 
