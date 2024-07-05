@@ -68,7 +68,7 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
-    let mut wifi = peripherals.WIFI;
+    let wifi = peripherals.WIFI;
     let (wifi_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
@@ -119,6 +119,8 @@ async fn main(spawner: Spawner) {
     }
 
     if !wifi_connected {
+        static WIFI_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
+
         let mut bluetooth = peripherals.BT;
         let connector = BleConnector::new(&init, &mut bluetooth);
         let mut ble = Ble::new(connector, esp_wifi::current_millis);
@@ -144,7 +146,6 @@ async fn main(spawner: Spawner) {
             let mut rf = |_offset: usize, data: &mut [u8]| {
                 let mut tmp = String::<128>::new();
                 let dsa = controller.scan_with_config_sync::<10>(Default::default());
-                log::info!("{dsa:?}");
                 if let Ok((dsa, count)) = dsa {
                     for i in 0..count {
                         let d = &dsa[i];
@@ -152,17 +153,18 @@ async fn main(spawner: Spawner) {
                         _ = tmp.push('\n');
                     }
                 }
-                log::info!("tmp: {tmp:?}");
 
                 data[..tmp.len()].copy_from_slice(&tmp[..tmp.len()].as_bytes());
                 tmp.len()
             };
             let mut wf = |offset: usize, data: &[u8]| {
                 log::info!("RECEIVED: {} {:?}", offset, data);
+                WIFI_SIG.signal(69);
             };
 
             let mut wf2 = |offset: usize, data: &[u8]| {
                 log::info!("RECEIVED: {} {:?}", offset, data);
+                WIFI_SIG.signal(123);
             };
 
             let mut rf3 = |_offset: usize, data: &mut [u8]| {
@@ -209,7 +211,12 @@ async fn main(spawner: Spawner) {
                     }
                 }
 
-                Timer::after_millis(100).await;
+                if WIFI_SIG.signaled() {
+                    let data = WIFI_SIG.wait().await;
+                    log::warn!("SIGNAL_RES: {:?}", data);
+                }
+
+                Timer::after_millis(10).await;
             }
         }
     }
@@ -218,225 +225,6 @@ async fn main(spawner: Spawner) {
         .spawn(connection(controller, stack))
         .expect("connection spawn");
     spawner.spawn(net_task(stack)).expect("net task spawn");
-
-    //let mut wifi = peripherals.WIFI;
-    //let wifi_cloned = unsafe { wifi.clone_unchecked() };
-
-    /*
-    let (wifi_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
-
-    let config = Config::dhcpv4(Default::default());
-    let seed = 69420;
-
-    let stack = &*make_static!(Stack::new(
-        wifi_interface,
-        config,
-        make_static!(StackResources::<3>::new()),
-        seed,
-    ));
-
-    /*
-    while !matches!(controller.is_started(), Ok(true)) {
-        log::info!("dsa");
-        Timer::after_millis(5).await;
-    }
-    */
-
-    let client_config = Configuration::Client(ClientConfiguration {
-        ssid: WIFI_SSID.try_into().expect("Wifi ssid parse"),
-        password: WIFI_PSK.try_into().expect("Wifi psk parse"),
-        ..Default::default()
-    });
-    controller.set_configuration(&client_config).unwrap();
-    log::info!("Starting wifi");
-    controller.start().await.unwrap();
-    log::info!("Wifi started!");
-
-    log::info!("About to connect...");
-    let start_time = embassy_time::Instant::now();
-    let mut wifi_success = false;
-    loop {
-        if start_time.elapsed().as_secs() > 15 {
-            log::warn!("Connect timeout!");
-            break;
-        }
-
-        match with_timeout(Duration::from_secs(15), controller.connect()).await {
-            Ok(res) => match res {
-                Ok(_) => {
-                    log::info!("Wifi connected!");
-                    wifi_success = true;
-                    break;
-                }
-                Err(e) => {
-                    log::info!("Failed to connect to wifi: {e:?}");
-                }
-            },
-            Err(_) => {
-                log::warn!("Connect timeout.1");
-                break;
-            }
-        }
-    }
-    */
-
-    /*
-    let mut bluetooth = peripherals.BT;
-
-    let connector = BleConnector::new(&init, &mut bluetooth);
-    let mut ble = Ble::new(connector, esp_wifi::current_millis);
-    log::info!("Connector created");
-
-    loop {
-        log::info!("{:?}", ble.init().await);
-        log::info!("{:?}", ble.cmd_set_le_advertising_parameters().await);
-        log::info!(
-            "{:?}",
-            ble.cmd_set_le_advertising_data(
-                create_advertising_data(&[
-                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
-                    AdStructure::CompleteLocalName(esp_hal::chip!()),
-                ])
-                .unwrap()
-            )
-            .await
-        );
-        log::info!("{:?}", ble.cmd_set_le_advertise_enable(true).await);
-
-        log::info!("started advertising");
-
-        let mut rf = |_offset: usize, data: &mut [u8]| {
-            data[..20].copy_from_slice(&b"Hello Bare-Metal BLE"[..]);
-            17
-        };
-        let mut wf = |offset: usize, data: &[u8]| {
-            log::info!("RECEIVED: {} {:?}", offset, data);
-        };
-
-        let mut wf2 = |offset: usize, data: &[u8]| {
-            log::info!("RECEIVED: {} {:?}", offset, data);
-        };
-
-        let mut rf3 = |_offset: usize, data: &mut [u8]| {
-            data[..5].copy_from_slice(&b"Hola!"[..]);
-            5
-        };
-        let mut wf3 = |offset: usize, data: &[u8]| {
-            log::info!("RECEIVED: Offset {}, data {:?}", offset, data);
-        };
-
-        gatt!([service {
-            uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-            characteristics: [
-                characteristic {
-                    uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-                    read: rf,
-                    write: wf,
-                },
-                characteristic {
-                    uuid: "957312e0-2354-11eb-9f10-fbc30a62cf38",
-                    write: wf2,
-                },
-                characteristic {
-                    name: "my_characteristic",
-                    uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
-                    notify: true,
-                    read: rf3,
-                    write: wf3,
-                },
-            ],
-        },]);
-
-        let mut rng = bleps::no_rng::NoRng;
-        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
-
-        let mut notifier = || async {
-            let mut data = [0u8; 13];
-            NotificationData::new(my_characteristic_handle, &data)
-        };
-
-        srv.run(&mut notifier).await.unwrap();
-    }
-    */
-
-    /*
-    let mut wifi_success = false;
-    if !wifi_success {
-        let (wifi_ap, wifi_sta, mut controller) =
-            esp_wifi::wifi::new_ap_sta(&init, wifi_cloned).unwrap();
-
-        let config = Config::ipv4_static(StaticConfigV4 {
-            address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24),
-            gateway: Some(Ipv4Address::new(192, 168, 4, 1)),
-            dns_servers: Default::default(),
-        });
-
-        let stack = &*make_static!(Stack::new(
-            wifi_ap,
-            config,
-            make_static!(StackResources::<3>::new()),
-            12345,
-        ));
-
-        let client_config = Configuration::AccessPoint(AccessPointConfiguration {
-            ssid: "esp-wifi".try_into().unwrap(),
-            ..Default::default()
-        });
-        controller.set_configuration(&client_config).unwrap();
-        log::info!("Starting wifi");
-        controller.start().await.unwrap();
-        log::info!("Wifi started!");
-
-        _ = spawner.spawn(ap_task(&stack));
-
-        while !stack.is_link_up() {
-            Timer::after_millis(500).await
-        }
-
-        loop {
-            let scanned = controller.scan_n::<16>().await.unwrap();
-            log::info!("scanned: {scanned:?}");
-
-            Timer::after_millis(500).await
-        }
-    }
-    */
-
-    /*
-    spawner
-        .spawn(connection(controller, stack))
-        .expect("connection spawn");
-    spawner.spawn(net_task(stack)).expect("net task spawn");
-    */
-
-    /*
-    loop {
-        log::info!("Wait for wifi!");
-        Timer::after(Duration::from_secs(1)).await;
-
-        if let Some(config) = stack.config_v4() {
-            log::info!("Got IP: {}", config.address);
-            break;
-        }
-    }
-    */
-
-    //Timer::after_millis(15000).await;
-
-    /*
-    let mut socket = unsafe {
-        TcpSocket::new(
-            stack,
-            &mut *core::ptr::addr_of_mut!(RX_BUFF),
-            &mut *core::ptr::addr_of_mut!(TX_BUFF),
-        )
-    };
-
-    let ip = embassy_net::IpEndpoint::from_str(OTA_SERVER_IP).expect("Wrong ip addr");
-    socket.connect(ip).await.expect("Cannot connect!");
-    */
 
     loop {
         log::info!("bump");
