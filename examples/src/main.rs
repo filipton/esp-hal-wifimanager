@@ -2,6 +2,13 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+use bleps::{
+    ad_structure::{
+        create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
+    },
+    attribute_server::{AttributeServer, NotificationData, WorkResult},
+    gatt, Ble, HciConnector,
+};
 use embassy_executor::Spawner;
 use embassy_net::{
     tcp::TcpSocket, Config, DhcpConfig, Ipv4Address, Ipv4Cidr, Stack, StackResources,
@@ -15,7 +22,7 @@ use esp_hal::{
     system::SystemControl, timer::timg::TimerGroup,
 };
 use esp_wifi::{
-    ble::controller,
+    ble::controller::BleConnector,
     wifi::{
         AccessPointConfiguration, ClientConfiguration, Configuration, WifiApDevice, WifiController,
         WifiDevice, WifiEvent, WifiStaDevice, WifiState,
@@ -47,7 +54,7 @@ async fn main(spawner: Spawner) {
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
     let timer = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG1, &clocks, None);
     let init = esp_wifi::initialize(
-        esp_wifi::EspWifiInitFor::Wifi,
+        esp_wifi::EspWifiInitFor::WifiBle,
         timer.timer0,
         rng.clone(),
         peripherals.RADIO_CLK,
@@ -58,8 +65,89 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
-    let mut wifi = peripherals.WIFI;
-    let wifi_cloned = unsafe { wifi.clone_unchecked() };
+    let mut bluetooth = peripherals.BT;
+    loop {
+        let connector = BleConnector::new(&init, &mut bluetooth);
+        let hci = HciConnector::new(connector, esp_wifi::current_millis);
+        let mut ble = Ble::new(&hci);
+
+        log::info!("{:?}", ble.init());
+        log::info!("{:?}", ble.cmd_set_le_advertising_parameters());
+        log::info!(
+            "{:?}",
+            ble.cmd_set_le_advertising_data(
+                create_advertising_data(&[
+                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
+                    AdStructure::CompleteLocalName(esp_hal::chip!()),
+                ])
+                .unwrap()
+            )
+        );
+        log::info!("{:?}", ble.cmd_set_le_advertise_enable(true));
+
+        log::info!("started advertising");
+
+        let mut rf = |_offset: usize, data: &mut [u8]| {
+            data[..20].copy_from_slice(&b"Hello Bare-Metal BLE"[..]);
+            17
+        };
+        let mut wf = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: {} {:?}", offset, data);
+        };
+
+        let mut wf2 = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: {} {:?}", offset, data);
+        };
+
+        let mut rf3 = |_offset: usize, data: &mut [u8]| {
+            data[..5].copy_from_slice(&b"Hola!"[..]);
+            5
+        };
+        let mut wf3 = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: Offset {}, data {:?}", offset, data);
+        };
+
+        gatt!([service {
+            uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+            characteristics: [
+                characteristic {
+                    uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+                    read: rf,
+                    write: wf,
+                },
+                characteristic {
+                    uuid: "957312e0-2354-11eb-9f10-fbc30a62cf38",
+                    write: wf2,
+                },
+                characteristic {
+                    name: "my_characteristic",
+                    uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
+                    notify: true,
+                    read: rf3,
+                    write: wf3,
+                },
+            ],
+        },]);
+
+        let mut rng = bleps::no_rng::NoRng;
+        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
+        loop {
+            match srv.do_work() {
+                Ok(res) => {
+                    if let WorkResult::GotDisconnected = res {
+                        break;
+                    }
+                },
+                Err(e) => {
+                    log::error!("err: {e:?}");
+                }
+            }
+        }
+    }
+
+    //let mut wifi = peripherals.WIFI;
+    //let wifi_cloned = unsafe { wifi.clone_unchecked() };
 
     /*
     let (wifi_interface, mut controller) =
@@ -120,6 +208,87 @@ async fn main(spawner: Spawner) {
     }
     */
 
+    /*
+    let mut bluetooth = peripherals.BT;
+
+    let connector = BleConnector::new(&init, &mut bluetooth);
+    let mut ble = Ble::new(connector, esp_wifi::current_millis);
+    log::info!("Connector created");
+
+    loop {
+        log::info!("{:?}", ble.init().await);
+        log::info!("{:?}", ble.cmd_set_le_advertising_parameters().await);
+        log::info!(
+            "{:?}",
+            ble.cmd_set_le_advertising_data(
+                create_advertising_data(&[
+                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
+                    AdStructure::CompleteLocalName(esp_hal::chip!()),
+                ])
+                .unwrap()
+            )
+            .await
+        );
+        log::info!("{:?}", ble.cmd_set_le_advertise_enable(true).await);
+
+        log::info!("started advertising");
+
+        let mut rf = |_offset: usize, data: &mut [u8]| {
+            data[..20].copy_from_slice(&b"Hello Bare-Metal BLE"[..]);
+            17
+        };
+        let mut wf = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: {} {:?}", offset, data);
+        };
+
+        let mut wf2 = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: {} {:?}", offset, data);
+        };
+
+        let mut rf3 = |_offset: usize, data: &mut [u8]| {
+            data[..5].copy_from_slice(&b"Hola!"[..]);
+            5
+        };
+        let mut wf3 = |offset: usize, data: &[u8]| {
+            log::info!("RECEIVED: Offset {}, data {:?}", offset, data);
+        };
+
+        gatt!([service {
+            uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+            characteristics: [
+                characteristic {
+                    uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+                    read: rf,
+                    write: wf,
+                },
+                characteristic {
+                    uuid: "957312e0-2354-11eb-9f10-fbc30a62cf38",
+                    write: wf2,
+                },
+                characteristic {
+                    name: "my_characteristic",
+                    uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
+                    notify: true,
+                    read: rf3,
+                    write: wf3,
+                },
+            ],
+        },]);
+
+        let mut rng = bleps::no_rng::NoRng;
+        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
+
+        let mut notifier = || async {
+            let mut data = [0u8; 13];
+            NotificationData::new(my_characteristic_handle, &data)
+        };
+
+        srv.run(&mut notifier).await.unwrap();
+    }
+    */
+
+    /*
     let mut wifi_success = false;
     if !wifi_success {
         let (wifi_ap, wifi_sta, mut controller) =
@@ -160,6 +329,7 @@ async fn main(spawner: Spawner) {
             Timer::after_millis(500).await
         }
     }
+    */
 
     /*
     spawner
@@ -180,7 +350,7 @@ async fn main(spawner: Spawner) {
     }
     */
 
-    Timer::after_millis(15000).await;
+    //Timer::after_millis(15000).await;
 
     /*
     let mut socket = unsafe {
