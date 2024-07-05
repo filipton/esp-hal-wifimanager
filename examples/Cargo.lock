@@ -1492,6 +1492,7 @@ dependencies = [
  "esp-println",
  "esp-storage",
  "esp-wifi",
+ "heapless",
  "log",
  "static_cell",
 ]

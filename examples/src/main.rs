@@ -3,7 +3,10 @@
 #![feature(type_alias_impl_trait)]
 
 use embassy_executor::Spawner;
-use embassy_net::{tcp::TcpSocket, Config, Stack, StackResources};
+use embassy_net::{
+    tcp::TcpSocket, Config, DhcpConfig, Ipv4Address, Ipv4Cidr, Stack, StackResources,
+    StaticConfigV4,
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_backtrace as _;
@@ -14,8 +17,8 @@ use esp_hal::{
 use esp_wifi::{
     ble::controller,
     wifi::{
-        ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiStaDevice,
-        WifiState,
+        AccessPointConfiguration, ClientConfiguration, Configuration, WifiApDevice, WifiController,
+        WifiDevice, WifiEvent, WifiStaDevice, WifiState,
     },
 };
 use static_cell::make_static;
@@ -57,10 +60,10 @@ async fn main(spawner: Spawner) {
 
     let mut wifi = peripherals.WIFI;
     let wifi_cloned = unsafe { wifi.clone_unchecked() };
-    let (_wifi_ap, wifi_interface, controller) = esp_wifi::wifi::new_ap_sta(&init, wifi).unwrap();
 
+    /*
     let (wifi_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi_cloned, WifiStaDevice).unwrap();
+        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let config = Config::dhcpv4(Default::default());
     let seed = 69420;
@@ -91,6 +94,7 @@ async fn main(spawner: Spawner) {
 
     log::info!("About to connect...");
     let start_time = embassy_time::Instant::now();
+    let mut wifi_success = false;
     loop {
         if start_time.elapsed().as_secs() > 15 {
             log::warn!("Connect timeout!");
@@ -101,6 +105,7 @@ async fn main(spawner: Spawner) {
             Ok(res) => match res {
                 Ok(_) => {
                     log::info!("Wifi connected!");
+                    wifi_success = true;
                     break;
                 }
                 Err(e) => {
@@ -113,12 +118,57 @@ async fn main(spawner: Spawner) {
             }
         }
     }
+    */
 
+    let mut wifi_success = false;
+    if !wifi_success {
+        let (wifi_ap, wifi_sta, mut controller) =
+            esp_wifi::wifi::new_ap_sta(&init, wifi_cloned).unwrap();
+
+        let config = Config::ipv4_static(StaticConfigV4 {
+            address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24),
+            gateway: Some(Ipv4Address::new(192, 168, 4, 1)),
+            dns_servers: Default::default(),
+        });
+
+        let stack = &*make_static!(Stack::new(
+            wifi_ap,
+            config,
+            make_static!(StackResources::<3>::new()),
+            12345,
+        ));
+
+        let client_config = Configuration::AccessPoint(AccessPointConfiguration {
+            ssid: "esp-wifi".try_into().unwrap(),
+            ..Default::default()
+        });
+        controller.set_configuration(&client_config).unwrap();
+        log::info!("Starting wifi");
+        controller.start().await.unwrap();
+        log::info!("Wifi started!");
+
+        _ = spawner.spawn(ap_task(&stack));
+
+        while !stack.is_link_up() {
+            Timer::after_millis(500).await
+        }
+
+        loop {
+            let scanned = controller.scan_n::<16>().await.unwrap();
+            log::info!("scanned: {scanned:?}");
+
+            Timer::after_millis(500).await
+        }
+    }
+
+    /*
     spawner
         .spawn(connection(controller, stack))
         .expect("connection spawn");
     spawner.spawn(net_task(stack)).expect("net task spawn");
+    */
 
+    /*
     loop {
         log::info!("Wait for wifi!");
         Timer::after(Duration::from_secs(1)).await;
@@ -128,6 +178,7 @@ async fn main(spawner: Spawner) {
             break;
         }
     }
+    */
 
     Timer::after_millis(15000).await;
 
@@ -207,5 +258,10 @@ async fn connection(
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+    stack.run().await
+}
+
+#[embassy_executor::task]
+async fn ap_task(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
     stack.run().await
 }
