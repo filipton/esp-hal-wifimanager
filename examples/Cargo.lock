@@ -1481,7 +1481,9 @@ version = "0.1.0"
 dependencies = [
  "dotenvy",
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
+ "embassy-sync 0.6.0",
  "embassy-time",
  "esp-backtrace",
  "esp-hal",

@@ -18,6 +18,8 @@ embassy-time = { version = "0.3.1" }
 esp-storage = { version = "0.3.0", features = ["esp32s3"] }
 esp-hal-wifimanager = { path = "../" }
 static_cell = { version = "2.1.0", features = ["nightly"] }
+embassy-sync = "0.6.0"
+embassy-futures = "0.1.1"
 #heapless = { version = "0.8.0", default-features = false }
 
 [build-dependencies]
