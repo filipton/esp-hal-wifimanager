@@ -61,9 +61,11 @@ macro_rules! make_static {
 async fn main(spawner: Spawner) {
     let peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    let clocks =
+        ClockControl::configure(system.clock_control, esp_hal::clock::CpuClock::Clock80MHz)
+            .freeze();
+    //let clocks = ClockControl::max(system.clock_control).freeze();
     let clocks = &*make_static!(clocks);
-    //let io = Io::new(peripherals.GPIO, peripherals.IO_MUX);
 
     esp_println::logger::init_logger_from_env();
     log::set_max_level(log::LevelFilter::Info);
@@ -297,8 +299,8 @@ async fn main(spawner: Spawner) {
     */
 
     loop {
-        log::info!("bump");
-        Timer::after_millis(15000).await;
+        log::info!("bump {}", esp_hal::time::current_time());
+        Timer::after_millis(1000).await;
     }
 }
 

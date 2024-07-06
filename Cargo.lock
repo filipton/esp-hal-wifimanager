@@ -518,8 +518,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 [[package]]
 name = "esp-build"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b94a4b8d74e7cc7baabcca5b2277b41877e039ad9cd49959d48ef94dac7eab4b"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "quote",
  "syn 2.0.68",
@@ -529,8 +528,7 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44f1bf3b1b34bbeb59e24e630f26e21b95f9c2bb7c0a53361ae5a97c67936566"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "basic-toml",
  "bitfield 0.15.0",
@@ -573,13 +571,11 @@ dependencies = [
 [[package]]
 name = "esp-hal-embassy"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a892b9fe96cdfddab252ffa0ea90de66ccb078ff42d037b14ca9dfa3608b688a"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "cfg-if",
  "critical-section",
  "document-features",
- "embassy-executor",
  "embassy-time-driver",
  "esp-build",
  "esp-hal",
@@ -590,8 +586,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-procmacros"
 version = "0.11.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "788b535b8127a8f0d1f40a8d8e300e57a8c361c492d660dd08fe8e9a1b96ee3c"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "darling",
  "document-features",
@@ -624,8 +619,7 @@ dependencies = [
 [[package]]
 name = "esp-metadata"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "654b8f14bf076fe5995fe94fabbe41a98041e1f2f801e5b3404dcae87e476db6"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "basic-toml",
  "lazy_static",
@@ -636,8 +630,7 @@ dependencies = [
 [[package]]
 name = "esp-riscv-rt"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "404129c79e9dc34f8b468ec44e71ce36a0bd443cb88be0feffa4b9f3856c97a6"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "document-features",
  "riscv",
@@ -660,8 +653,7 @@ dependencies = [
 [[package]]
 name = "esp-wifi"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48709a955a7730ef27457682d4f3173d956ae7cd4182c46252a61bd2f61ace6c"
+source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
 dependencies = [
  "atomic-waker",
  "cfg-if",
@@ -701,8 +693,7 @@ dependencies = [
 [[package]]
 name = "esp32s3"
 version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53ac7bb447c239be8a6a9eba9aaf4099c3aab4b7aefca5871be8bf7d8c8893cf"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=a7c72f7#a7c72f72c4cc50d1595a0d5a395250306d741fed"
 dependencies = [
  "critical-section",
  "vcell",
