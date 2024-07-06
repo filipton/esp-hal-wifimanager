@@ -104,10 +104,27 @@ pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spa
         }
     }
 
-    if !wifi_connected {
-        spawner.spawn(bluetooth(init, bt)).expect("ble task spawn");
+    let mut generated_name = String::<32>::new();
+    let mut efuse = esp_hal::efuse::Efuse::get_mac_address()
+        .iter()
+        .fold(0u64, |acc, &x| (acc << 8) + x as u64);
 
-        let mut last_scan = Instant::now();
+    efuse = (!efuse).wrapping_add(efuse << 18);
+    efuse = efuse ^ (efuse >> 31);
+    efuse = efuse.wrapping_mul(21);
+    efuse = efuse ^ (efuse >> 11);
+    efuse = efuse.wrapping_add(efuse << 6);
+    efuse = efuse ^ (efuse >> 22);
+
+    let mac = efuse & 0x000000007FFFFFFF;
+    _ = core::fmt::write(&mut generated_name, format_args!("FKM-{:X}", mac));
+
+    if !wifi_connected {
+        spawner
+            .spawn(bluetooth(init, bt, generated_name))
+            .expect("ble task spawn");
+
+        let mut last_scan = Instant::MIN;
         loop {
             if WIFI_CONN_INFO_SIG.signaled() {
                 let conn_info = WIFI_CONN_INFO_SIG.wait().await;
@@ -200,7 +217,7 @@ pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spa
 }
 
 #[embassy_executor::task]
-async fn bluetooth(init: EspWifiInitialization, mut bt: BT) {
+async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
     static BLE_DATA_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
 
     let connector = BleConnector::new(&init, &mut bt);
@@ -213,7 +230,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT) {
                 create_advertising_data(&[
                     AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
                     AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
-                    AdStructure::CompleteLocalName(esp_hal::chip!()),
+                    AdStructure::CompleteLocalName(name.as_str()),
                 ])
                 .unwrap(),
             )
