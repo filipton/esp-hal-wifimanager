@@ -31,7 +31,6 @@ use esp_wifi::{
     },
 };
 use heapless::String;
-use static_cell::make_static;
 
 const WIFI_SSID: &'static str = env!("SSID");
 const WIFI_PSK: &'static str = env!("PSK");
@@ -48,6 +47,15 @@ pub struct WifiSigData {
 //static mut RX_BUFF: [u8; RX_BUFFER_SIZE] = [0; RX_BUFFER_SIZE];
 
 //static WIFI_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
+
+/// This is macro from static_cell (static_cell::make_static!) but without weird stuff
+macro_rules! make_static {
+    ($val:expr) => {{
+        type T = impl ::core::marker::Sized;
+        static STATIC_CELL: static_cell::StaticCell<T> = static_cell::StaticCell::new();
+        STATIC_CELL.uninit().write($val)
+    }};
+}
 
 #[main]
 async fn main(spawner: Spawner) {

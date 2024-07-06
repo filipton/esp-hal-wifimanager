@@ -12,7 +12,15 @@ use esp_wifi::{
     },
     EspWifiInitialization,
 };
-use static_cell::make_static;
+
+/// This is macro from static_cell (static_cell::make_static!) but without weird stuff
+macro_rules! make_static {
+    ($val:expr) => {{
+        type T = impl ::core::marker::Sized;
+        static STATIC_CELL: static_cell::StaticCell<T> = static_cell::StaticCell::new();
+        STATIC_CELL.uninit().write($val)
+    }};
+}
 
 pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spawner) {
     let (wifi_interface, mut controller) =
