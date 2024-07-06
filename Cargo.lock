@@ -611,10 +611,12 @@ dependencies = [
  "bleps",
  "embassy-executor",
  "embassy-net",
+ "embassy-sync 0.6.0",
  "embassy-time",
  "esp-hal",
  "esp-hal-embassy",
  "esp-wifi",
+ "heapless",
  "log",
  "static_cell",
 ]
