@@ -36,6 +36,12 @@ use static_cell::make_static;
 const WIFI_SSID: &'static str = env!("SSID");
 const WIFI_PSK: &'static str = env!("PSK");
 
+#[derive(Debug)]
+pub struct WifiSigData {
+    ssid: heapless::String<32>,
+    psk: heapless::String<64>,
+}
+
 //const RX_BUFFER_SIZE: usize = 16384;
 //const TX_BUFFER_SIZE: usize = 16384;
 //static mut TX_BUFF: [u8; TX_BUFFER_SIZE] = [0; TX_BUFFER_SIZE];
@@ -94,13 +100,15 @@ async fn main(spawner: Spawner) {
     log::info!("About to connect...");
     let start_time = embassy_time::Instant::now();
     let mut wifi_connected = false;
+
+    let timeout_s = 5;
     loop {
-        if start_time.elapsed().as_secs() > 15 {
+        if start_time.elapsed().as_secs() > timeout_s {
             log::warn!("Connect timeout!");
             break;
         }
 
-        match with_timeout(Duration::from_secs(15), controller.connect()).await {
+        match with_timeout(Duration::from_secs(timeout_s), controller.connect()).await {
             Ok(res) => match res {
                 Ok(_) => {
                     log::info!("Wifi connected!");
@@ -119,12 +127,12 @@ async fn main(spawner: Spawner) {
     }
 
     if !wifi_connected {
-        static WIFI_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
+        static WIFI_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
 
         let mut bluetooth = peripherals.BT;
         let connector = BleConnector::new(&init, &mut bluetooth);
         let mut ble = Ble::new(connector, esp_wifi::current_millis);
-        loop {
+        while !controller.is_connected().unwrap() {
             log::info!("{:?}", ble.init().await);
             log::info!("{:?}", ble.cmd_set_le_advertising_parameters().await);
             log::info!(
@@ -144,6 +152,7 @@ async fn main(spawner: Spawner) {
             log::info!("started advertising");
 
             let mut rf = |_offset: usize, data: &mut [u8]| {
+                /*
                 let mut tmp = String::<128>::new();
                 let dsa = controller.scan_with_config_sync::<10>(Default::default());
                 if let Ok((dsa, count)) = dsa {
@@ -156,49 +165,35 @@ async fn main(spawner: Spawner) {
 
                 data[..tmp.len()].copy_from_slice(&tmp[..tmp.len()].as_bytes());
                 tmp.len()
-            };
-            let mut wf = |offset: usize, data: &[u8]| {
-                log::info!("RECEIVED: {} {:?}", offset, data);
-                WIFI_SIG.signal(69);
-            };
-
-            let mut wf2 = |offset: usize, data: &[u8]| {
-                log::info!("RECEIVED: {} {:?}", offset, data);
-                WIFI_SIG.signal(123);
-            };
-
-            let mut rf3 = |_offset: usize, data: &mut [u8]| {
+                */
                 data[..5].copy_from_slice(&b"Hola!"[..]);
                 5
             };
-            let mut wf3 = |offset: usize, data: &[u8]| {
-                log::info!("RECEIVED: Offset {}, data {:?}", offset, data);
+
+            let mut wf = |offset: usize, data: &[u8]| {
+                log::info!("RECEIVED: {} {:?}", offset, data);
+                let mut tmp = [0; 128];
+                tmp[..data.len()].copy_from_slice(data);
+                WIFI_SIG.signal((tmp, data.len()));
             };
 
             gatt!([service {
                 uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-                characteristics: [
-                    characteristic {
-                        uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-                        read: rf,
-                        write: wf,
-                    },
-                    characteristic {
-                        uuid: "957312e0-2354-11eb-9f10-fbc30a62cf38",
-                        write: wf2,
-                    },
-                    characteristic {
-                        name: "my_characteristic",
-                        uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
-                        notify: true,
-                        read: rf3,
-                        write: wf3,
-                    },
-                ],
+                characteristics: [characteristic {
+                    uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+                    read: rf,
+                    write: wf,
+                }],
             },]);
 
             let mut rng = bleps::no_rng::NoRng;
             let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
+
+            let mut wifi_sig_field = 0;
+            let mut wifi_sig_data = WifiSigData {
+                ssid: String::new(),
+                psk: String::new(),
+            };
             loop {
                 match srv.do_work().await {
                     Ok(res) => {
@@ -212,8 +207,38 @@ async fn main(spawner: Spawner) {
                 }
 
                 if WIFI_SIG.signaled() {
-                    let data = WIFI_SIG.wait().await;
-                    log::warn!("SIGNAL_RES: {:?}", data);
+                    let (data, len) = WIFI_SIG.wait().await;
+                    log::warn!("SIGNAL_RES: {:?}", &data[..len]);
+
+                    for i in 0..len {
+                        let d = data[i];
+                        if d == 0x00 {
+                            wifi_sig_field += 1;
+                            continue;
+                        }
+
+                        if wifi_sig_field == 0 {
+                            _ = wifi_sig_data.ssid.push(d as char);
+                        } else if wifi_sig_field == 1 {
+                            _ = wifi_sig_data.psk.push(d as char);
+                        }
+                    }
+
+                    log::info!("tmp: {:?}", wifi_sig_data);
+                    if wifi_sig_field == 2 {
+                        log::info!("WIFI SIG 2");
+
+                        let client_config = Configuration::Client(ClientConfiguration {
+                            ssid: wifi_sig_data.ssid.clone(),
+                            password: wifi_sig_data.psk.clone(),
+                            ..Default::default()
+                        });
+                        controller.set_configuration(&client_config).unwrap();
+                        controller.connect().await.unwrap();
+                        log::info!("conn wifi");
+
+                        break;
+                    }
                 }
 
                 Timer::after_millis(10).await;
@@ -237,6 +262,7 @@ async fn connection(
     mut controller: WifiController<'static>,
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
+    //let spawner = embassy_executor::SendSpawner::for_current_executor().await;
     log::info!("start connection task");
     log::info!("Device capabilities: {:?}", controller.get_capabilities());
     loop {
