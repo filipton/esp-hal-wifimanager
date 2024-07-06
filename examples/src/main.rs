@@ -74,6 +74,9 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
+    esp_hal_wifimanager::test(init, peripherals.WIFI, peripherals.BT, &spawner).await;
+
+    /*
     let wifi = peripherals.WIFI;
     let (wifi_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
@@ -234,10 +237,43 @@ async fn main(spawner: Spawner) {
                             ..Default::default()
                         });
                         controller.set_configuration(&client_config).unwrap();
-                        controller.connect().await.unwrap();
-                        log::info!("conn wifi");
 
-                        break;
+                        let start_time = embassy_time::Instant::now();
+                        let mut wifi_connected = false;
+                        let timeout_s = 15;
+                        loop {
+                            if start_time.elapsed().as_secs() > timeout_s {
+                                log::warn!("Connect timeout!");
+                                break;
+                            }
+
+                            match with_timeout(Duration::from_secs(timeout_s), controller.connect())
+                                .await
+                            {
+                                Ok(res) => match res {
+                                    Ok(_) => {
+                                        log::info!("Wifi connected!");
+                                        wifi_connected = true;
+                                        break;
+                                    }
+                                    Err(e) => {
+                                        log::info!("Failed to connect to wifi: {e:?}");
+                                    }
+                                },
+                                Err(_) => {
+                                    log::warn!("Connect timeout.1");
+                                    break;
+                                }
+                            }
+                        }
+
+                        if !wifi_connected {
+                            wifi_sig_field = 0;
+                            wifi_sig_data.ssid.clear();
+                            wifi_sig_data.psk.clear();
+                        } else {
+                            break;
+                        }
                     }
                 }
 
@@ -250,6 +286,7 @@ async fn main(spawner: Spawner) {
         .spawn(connection(controller, stack))
         .expect("connection spawn");
     spawner.spawn(net_task(stack)).expect("net task spawn");
+    */
 
     loop {
         log::info!("bump");

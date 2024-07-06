@@ -6,4 +6,17 @@ edition = "2021"
 [lib]
 
 [dependencies]
+esp-hal = { version = "0.18.0", default-features = false, features = ["async"] }
+esp-hal-embassy = { version = "0.1.0", default-features = false, features = [] }
+embassy-net = { version = "0.4.0", default-features = false, features = ["tcp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
+esp-wifi = { version = "0.6.0", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
+bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
+static_cell = { version = "2.1.0", features = ["nightly"] }
 log = "0.4.22"
+embassy-time = { version = "0.3.1", default-features = false }
+embassy-executor = { version = "0.5.0", default-features = false }
+
+[features]
+#default = []
+default = ["esp32s3"]
+esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-hal-embassy/time-timg0"]

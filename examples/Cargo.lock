@@ -647,7 +647,15 @@ dependencies = [
 name = "esp-hal-wifimanager"
 version = "0.1.0"
 dependencies = [
+ "bleps",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "esp-hal",
+ "esp-hal-embassy",
+ "esp-wifi",
  "log",
+ "static_cell",
 ]
 
 [[package]]
