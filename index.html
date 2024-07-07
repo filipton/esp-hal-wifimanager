@@ -1,0 +1,63 @@
+<html>
+
+<head>
+    <script>
+        let device = null;
+        let server = null;
+        let service = null;
+        let characteristic = null;
+
+        async function req() {
+            device = await navigator.bluetooth.requestDevice({
+                filters: [{
+                    namePrefix: 'FKM-'
+                }],
+                optionalServices: ['937312e0-2354-11eb-9f10-fbc30a62cf38'],
+                //acceptAllDevices: true,
+                /*
+                filters: [{
+                    services: ['937312e0-2354-11eb-9f10-fbc30a62cf38']
+                }]
+                */
+            });
+
+            server = await device.gatt.connect();
+            service = await server.getPrimaryService('937312e0-2354-11eb-9f10-fbc30a62cf38');
+            characteristic = await service.getCharacteristic('937312e0-2354-11eb-9f10-fbc30a62cf38');
+
+            const value = await characteristic.readValue();
+            const decoder = new TextDecoder('utf-8');
+            document.getElementById('res').innerText = decoder.decode(value);
+            setInterval(async () => {
+                document.getElementById('res').innerText = "";
+                const value = await characteristic.readValue();
+                const decoder = new TextDecoder('utf-8');
+                document.getElementById('res').innerText = decoder.decode(value);
+            }, 5000);
+        }
+
+        async function conn() {
+            if (characteristic === null) {
+                return;
+            }
+
+            let ssid = "";
+            let psk = "";
+
+            const encoder = new TextEncoder('utf-8');
+            const value = encoder.encode(ssid + '\0' + psk + '\0');
+            await characteristic.writeValue(value);
+        }
+    </script>
+</head>
+
+<body>
+    <button onclick="req()">REQ</button>
+
+    <h1>RES:</h1>
+    <p id="res"></p>
+
+    <button onclick="conn()">CONNECT</button>
+</body>
+
+</html>
