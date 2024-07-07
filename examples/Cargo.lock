@@ -1433,6 +1433,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tickv"
+version = "1.0.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "toml"
 version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1555,6 +1562,7 @@ dependencies = [
  "embassy-executor",
  "embassy-net",
  "embassy-time",
+ "embedded-storage",
  "esp-backtrace",
  "esp-hal",
  "esp-hal-embassy",
@@ -1565,6 +1573,7 @@ dependencies = [
  "heapless",
  "log",
  "static_cell",
+ "tickv",
 ]
 
 [[package]]
