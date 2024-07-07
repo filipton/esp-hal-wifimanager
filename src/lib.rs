@@ -1,8 +1,6 @@
 #![no_std]
 #![feature(type_alias_impl_trait)]
 
-use core::str::FromStr;
-
 use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -28,11 +26,13 @@ use esp_wifi::{
 };
 use heapless::{String, Vec};
 
-#[derive(Debug, Clone)]
-pub struct WifiSigData {
-    ssid: String<32>,
-    psk: String<64>,
-}
+// Hardcoded values
+// const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
+// const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
+
+// TODO: maybe add some settings struct
+const WIFI_CONNECTION_TIMEOUT: u64 = 15_000; //ms (time after ble server spawns)
+const WIFI_RECONNECT_TIMEOUT: u64 = 1000; //ms
 
 /// This is macro from static_cell (static_cell::make_static!) but without weird stuff
 macro_rules! make_static {
@@ -43,15 +43,20 @@ macro_rules! make_static {
     }};
 }
 
+#[derive(Debug, Clone)]
+pub struct WifiSigData {
+    ssid: String<32>,
+    psk: String<64>,
+}
+
+static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());
 /// This is used to tell main task to connect to wifi
 static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, WifiSigData> = Signal::new();
-
 /// This is used to tell ble task about conn result
 static WIFI_CONN_RES_SIG: Signal<CriticalSectionRawMutex, bool> = Signal::new();
 
-static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());
-
-pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spawner) {
+// TODO: add errors and Result's
+pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spawner) {
     let (wifi_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
@@ -65,6 +70,7 @@ pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spa
         seed,
     ));
 
+    // TODO: read flash to get ssid an psk
     let client_config = Configuration::Client(ClientConfiguration {
         ssid: "".try_into().expect("Wifi ssid parse"),
         password: "".try_into().expect("Wifi psk parse"),
@@ -75,140 +81,11 @@ pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spa
     controller.start().await.unwrap();
     log::info!("Wifi started!");
 
-    log::info!("About to connect...");
-    let start_time = embassy_time::Instant::now();
-    let mut wifi_connected = false;
-
-    let timeout_s = 15;
-    loop {
-        if start_time.elapsed().as_secs() > timeout_s {
-            log::warn!("Connect timeout!");
-            break;
-        }
-
-        match with_timeout(Duration::from_secs(timeout_s), controller.connect()).await {
-            Ok(res) => match res {
-                Ok(_) => {
-                    log::info!("Wifi connected!");
-                    wifi_connected = true;
-                    break;
-                }
-                Err(e) => {
-                    log::info!("Failed to connect to wifi: {e:?}");
-                }
-            },
-            Err(_) => {
-                log::warn!("Connect timeout.1");
-                break;
-            }
-        }
-    }
-
-    let mut generated_name = String::<32>::new();
-    let mut efuse = esp_hal::efuse::Efuse::get_mac_address()
-        .iter()
-        .fold(0u64, |acc, &x| (acc << 8) + x as u64);
-
-    efuse = (!efuse).wrapping_add(efuse << 18);
-    efuse = efuse ^ (efuse >> 31);
-    efuse = efuse.wrapping_mul(21);
-    efuse = efuse ^ (efuse >> 11);
-    efuse = efuse.wrapping_add(efuse << 6);
-    efuse = efuse ^ (efuse >> 22);
-
-    let mac = efuse & 0x000000007FFFFFFF;
-    _ = core::fmt::write(&mut generated_name, format_args!("FKM-{:X}", mac));
-
+    let wifi_connected = try_to_wifi_connect(&mut controller).await;
     if !wifi_connected {
-        spawner
-            .spawn(bluetooth(init, bt, generated_name))
-            .expect("ble task spawn");
-
-        let mut last_scan = Instant::MIN;
-        loop {
-            if WIFI_CONN_INFO_SIG.signaled() {
-                let conn_info = WIFI_CONN_INFO_SIG.wait().await;
-                log::warn!("trying to connect to: {:?}", conn_info);
-
-                let client_config = Configuration::Client(ClientConfiguration {
-                    ssid: conn_info.ssid,
-                    password: conn_info.psk,
-                    ..Default::default()
-                });
-                controller.set_configuration(&client_config).unwrap();
-
-                let start_time = embassy_time::Instant::now();
-                let mut wifi_connected = false;
-                let timeout_s = 15;
-                loop {
-                    if start_time.elapsed().as_secs() > timeout_s {
-                        log::warn!("Connect timeout!");
-                        break;
-                    }
-
-                    match with_timeout(Duration::from_secs(timeout_s), controller.connect()).await {
-                        Ok(res) => match res {
-                            Ok(_) => {
-                                log::info!("Wifi connected!");
-                                wifi_connected = true;
-                                break;
-                            }
-                            Err(e) => {
-                                log::info!("Failed to connect to wifi: {e:?}");
-                            }
-                        },
-                        Err(_) => {
-                            log::warn!("Connect timeout.1");
-                            break;
-                        }
-                    }
-                }
-
-                WIFI_CONN_RES_SIG.signal(wifi_connected);
-                if wifi_connected {
-                    break;
-                }
-            }
-
-            if last_scan.elapsed().as_millis() >= 15000 {
-                log::info!("SCAN NOW!!!!");
-
-                let mut scan_str = String::<256>::new();
-                let dsa = controller.scan_with_config::<10>(Default::default()).await;
-                if let Ok((dsa, count)) = dsa {
-                    for i in 0..count {
-                        let d = &dsa[i];
-                        _ = scan_str.push_str(&d.ssid);
-                        _ = scan_str.push_str(": ");
-                        _ = core::fmt::write(&mut scan_str, format_args!("{}", d.signal_strength));
-                        //_ = scan_str.push_str(&d.signal_strength);
-                        _ = scan_str.push('\n');
-                    }
-                }
-
-                log::info!("Scan res:\n{}", scan_str);
-
-                let mut wifis = WIFI_SCAN_RES.lock().await;
-                wifis.clear();
-                _ = wifis.extend_from_slice(&scan_str.as_bytes());
-                last_scan = Instant::now();
-            }
-            /*
-            if WIFI_SCAN_SIG.signaled() {
-                WIFI_SCAN_SIG.wait().await;
-
-                log::info!("Recv: WIFI_SCAN_SIG");
-                Timer::after_millis(1000).await;
-                WIFI_SCAN_RES_SIG.signal(());
-                log::info!("Send: WIFI_SCAN_SIG");
-            }
-            */
-            //let mut d = WIFI_SCAN_RES.lock().await;
-
-            Timer::after_millis(100).await;
-        }
+        // this will "block" it has loop
+        bluetooth_task(&spawner, init, bt, &mut controller).await;
     }
-    log::info!("wiif_connected: {wifi_connected}");
 
     spawner
         .spawn(connection(controller, stack))
@@ -216,8 +93,100 @@ pub async fn test(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spa
     spawner.spawn(net_task(stack)).expect("net task spawn");
 }
 
+async fn try_to_wifi_connect(controller: &mut WifiController<'static>) -> bool {
+    let start_time = embassy_time::Instant::now();
+
+    loop {
+        if start_time.elapsed().as_millis() > WIFI_CONNECTION_TIMEOUT {
+            log::warn!("Connect timeout!");
+            return false;
+        }
+
+        match with_timeout(
+            Duration::from_millis(WIFI_CONNECTION_TIMEOUT),
+            controller.connect(),
+        )
+        .await
+        {
+            Ok(res) => match res {
+                Ok(_) => {
+                    log::info!("Wifi connected!");
+                    return true;
+                }
+                Err(e) => {
+                    log::info!("Failed to connect to wifi: {e:?}");
+                }
+            },
+            Err(_) => {
+                log::warn!("Connect timeout.1");
+                return false;
+            }
+        }
+    }
+}
+
+async fn bluetooth_task(
+    spawner: &Spawner,
+    init: EspWifiInitialization,
+    bt: BT,
+    controller: &mut WifiController<'static>,
+) {
+    // TODO: name should be passed as parameter outside the lib
+    let mut generated_name = String::<31>::new();
+    _ = core::fmt::write(
+        &mut generated_name,
+        format_args!("ESP-{:X}", get_efuse_mac()),
+    );
+
+    spawner
+        .spawn(bluetooth(init, bt, generated_name))
+        .expect("ble task spawn");
+
+    let mut last_scan = Instant::MIN;
+    loop {
+        if WIFI_CONN_INFO_SIG.signaled() {
+            let conn_info = WIFI_CONN_INFO_SIG.wait().await;
+            log::warn!("trying to connect to: {:?}", conn_info);
+
+            let client_config = Configuration::Client(ClientConfiguration {
+                ssid: conn_info.ssid,
+                password: conn_info.psk,
+                ..Default::default()
+            });
+            controller.set_configuration(&client_config).unwrap();
+
+            let wifi_connected = try_to_wifi_connect(controller).await;
+            WIFI_CONN_RES_SIG.signal(wifi_connected);
+            if wifi_connected {
+                break;
+            }
+        }
+
+        if last_scan.elapsed().as_millis() >= 15000 {
+            let mut scan_str = String::<256>::new();
+            let dsa = controller.scan_with_config::<10>(Default::default()).await;
+            if let Ok((dsa, count)) = dsa {
+                for i in 0..count {
+                    let d = &dsa[i];
+                    _ = scan_str.push_str(&d.ssid);
+                    _ = scan_str.push_str(": ");
+                    _ = core::fmt::write(&mut scan_str, format_args!("{}", d.signal_strength));
+                    _ = scan_str.push('\n');
+                }
+            }
+
+            let mut wifis = WIFI_SCAN_RES.lock().await;
+            wifis.clear();
+            _ = wifis.extend_from_slice(&scan_str.as_bytes());
+            last_scan = Instant::now();
+        }
+
+        Timer::after_millis(100).await;
+    }
+}
+
 #[embassy_executor::task]
-async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
+async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
     static BLE_DATA_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
 
     let connector = BleConnector::new(&init, &mut bt);
@@ -258,9 +227,9 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
         };
 
         gatt!([service {
-            uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+            uuid: "f254a578-ef88-4372-b5f5-5ecf87e65884",
             characteristics: [characteristic {
-                uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
+                uuid: "bcd7e573-b0b2-4775-83c0-acbf3aaf210c",
                 read: rf,
                 write: wf,
             }],
@@ -274,6 +243,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
             ssid: String::new(),
             psk: String::new(),
         };
+
         loop {
             match srv.do_work().await {
                 Ok(res) => {
@@ -303,7 +273,6 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
                 }
 
                 if wifi_sig_field == 2 {
-                    log::info!("send WIFI_CONN_INFO_SIG ({:?})", wifi_sig_data);
                     WIFI_CONN_INFO_SIG.signal(wifi_sig_data.clone());
                     wifi_sig_field = 0;
                     wifi_sig_data.ssid.clear();
@@ -311,6 +280,8 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
 
                     let wifi_connected = WIFI_CONN_RES_SIG.wait().await;
                     if wifi_connected {
+                        // TODO: save ssid and psk to flash
+
                         break 'outer;
                     }
                 }
@@ -319,8 +290,6 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
             Timer::after_millis(10).await;
         }
     }
-
-    log::info!("After ble outer loop!!");
 }
 
 #[embassy_executor::task]
@@ -328,45 +297,74 @@ async fn connection(
     mut controller: WifiController<'static>,
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
-    //let spawner = embassy_executor::SendSpawner::for_current_executor().await;
-    log::info!("start connection task");
-    log::info!("Device capabilities: {:?}", controller.get_capabilities());
+    log::info!(
+        "WIFI Device capabilities: {:?}",
+        controller.get_capabilities()
+    );
+
+    let mut first_conn = true;
     loop {
         if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
+            if first_conn {
+                wifi_wait_for_ip(stack).await;
+                first_conn = false;
+            }
+
             // wait until we're no longer connected
             controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            Timer::after(Duration::from_millis(5000)).await
+            Timer::after(Duration::from_millis(WIFI_RECONNECT_TIMEOUT)).await
         }
 
         match controller.connect().await {
             Ok(_) => {
                 log::info!("Wifi connected!");
-
-                loop {
-                    if stack.is_link_up() {
-                        break;
-                    }
-                    Timer::after(Duration::from_millis(500)).await;
-                }
-
-                log::info!("Waiting to get IP address...");
-                loop {
-                    if let Some(config) = stack.config_v4() {
-                        log::info!("Got IP: {}", config.address);
-                        break;
-                    }
-                    Timer::after(Duration::from_millis(500)).await;
-                }
+                wifi_wait_for_ip(stack).await;
             }
             Err(e) => {
                 log::info!("Failed to connect to wifi: {e:?}");
-                Timer::after(Duration::from_millis(5000)).await
+                Timer::after(Duration::from_millis(WIFI_RECONNECT_TIMEOUT)).await
             }
         }
+    }
+}
+
+async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+    while !stack.is_link_up() {
+        Timer::after(Duration::from_millis(500)).await;
+    }
+
+    log::info!("Waiting to get IP address...");
+    loop {
+        if let Some(config) = stack.config_v4() {
+            log::info!("Got IP: {}", config.address);
+            break;
+        }
+
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
+}
+
+/// This function returns value with maximum of signed integer
+/// (2147483647) to easily store it in postgres db as integer
+///
+/// NOTE: this isn't exact efuse mac, it is hashed efuse mac!
+pub fn get_efuse_mac() -> u32 {
+    let mut efuse = esp_hal::efuse::Efuse::get_mac_address()
+        .iter()
+        .fold(0u64, |acc, &x| (acc << 8) + x as u64);
+
+    efuse = (!efuse).wrapping_add(efuse << 18);
+    efuse = efuse ^ (efuse >> 31);
+    efuse = efuse.wrapping_mul(21);
+    efuse = efuse ^ (efuse >> 11);
+    efuse = efuse.wrapping_add(efuse << 6);
+    efuse = efuse ^ (efuse >> 22);
+
+    let mac = efuse & 0x000000007FFFFFFF;
+    mac as u32
 }
