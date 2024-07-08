@@ -33,11 +33,15 @@ mod nvs;
 // const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
 // const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
 
-// TODO: maybe add some settings struct
-const NVS_FLASH_SIZE: usize = 0x6000;
-const NVS_FLASH_OFFSET: usize = 0x9000;
-const WIFI_CONNECTION_TIMEOUT: u64 = 15_000; //ms (time after ble server spawns)
-const WIFI_RECONNECT_TIMEOUT: u64 = 1000; //ms
+#[derive(Clone, Debug)]
+pub struct WmSettings {
+    pub flash_size: usize,
+    pub flash_offset: usize,
+    pub wifi_conn_timeout: u64,
+    pub wifi_reconnect_time: u64,
+    pub wifi_scan_interval: u64,
+    pub wifi_seed: u64,
+}
 
 /// This is macro from static_cell (static_cell::make_static!) but without weird stuff
 macro_rules! make_static {
@@ -61,12 +65,18 @@ static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, WifiSigData> = Signal
 static WIFI_CONN_RES_SIG: Signal<CriticalSectionRawMutex, bool> = Signal::new();
 
 // TODO: add errors and Result's
-pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &Spawner) {
+pub async fn init_wm(
+    settings: WmSettings,
+    init: EspWifiInitialization,
+    wifi: WIFI,
+    bt: BT,
+    spawner: &Spawner,
+) {
     let (wifi_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let config = Config::dhcpv4(Default::default());
-    let seed = 69420;
+    let seed = settings.wifi_seed;
 
     let stack = &*make_static!(Stack::new(
         wifi_interface,
@@ -78,9 +88,9 @@ pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &
 
     let mut read_buf: [u8; 1024] = [0; 1024];
     let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-        NvsFlash::new(NVS_FLASH_OFFSET),
+        NvsFlash::new(settings.flash_offset),
         &mut read_buf,
-        NVS_FLASH_SIZE,
+        settings.flash_size,
     );
     _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
 
@@ -102,6 +112,7 @@ pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &
 
     drop(nvs);
 
+    let wifi_reconnect_time = settings.wifi_reconnect_time;
     if ssid.len() > 0 && psk.len() > 0 {
         let client_config = Configuration::Client(ClientConfiguration {
             ssid,
@@ -110,32 +121,35 @@ pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &
         });
         controller.set_configuration(&client_config).unwrap();
 
-        let wifi_connected = try_to_wifi_connect(&mut controller).await;
+        let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
-            bluetooth_task(&spawner, init, bt, &mut controller).await;
+            bluetooth_task(settings, &spawner, init, bt, &mut controller).await;
         }
     } else {
-        bluetooth_task(&spawner, init, bt, &mut controller).await;
+        bluetooth_task(settings, &spawner, init, bt, &mut controller).await;
     }
 
     spawner
-        .spawn(connection(controller, stack))
+        .spawn(connection(wifi_reconnect_time, controller, stack))
         .expect("connection spawn");
     spawner.spawn(net_task(stack)).expect("net task spawn");
 }
 
-async fn try_to_wifi_connect(controller: &mut WifiController<'static>) -> bool {
+async fn try_to_wifi_connect(
+    controller: &mut WifiController<'static>,
+    settings: &WmSettings,
+) -> bool {
     let start_time = embassy_time::Instant::now();
 
     loop {
-        if start_time.elapsed().as_millis() > WIFI_CONNECTION_TIMEOUT {
+        if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
             log::warn!("Connect timeout!");
             return false;
         }
 
         match with_timeout(
-            Duration::from_millis(WIFI_CONNECTION_TIMEOUT),
+            Duration::from_millis(settings.wifi_conn_timeout),
             controller.connect(),
         )
         .await
@@ -150,7 +164,7 @@ async fn try_to_wifi_connect(controller: &mut WifiController<'static>) -> bool {
                 }
             },
             Err(_) => {
-                log::warn!("Connect timeout.1");
+                log::warn!("Connect timeout!");
                 return false;
             }
         }
@@ -158,6 +172,7 @@ async fn try_to_wifi_connect(controller: &mut WifiController<'static>) -> bool {
 }
 
 async fn bluetooth_task(
+    settings: WmSettings,
     spawner: &Spawner,
     init: EspWifiInitialization,
     bt: BT,
@@ -187,14 +202,14 @@ async fn bluetooth_task(
             });
             controller.set_configuration(&client_config).unwrap();
 
-            let wifi_connected = try_to_wifi_connect(controller).await;
+            let wifi_connected = try_to_wifi_connect(controller, &settings).await;
             WIFI_CONN_RES_SIG.signal(wifi_connected);
             if wifi_connected {
                 let mut read_buf: [u8; 1024] = [0; 1024];
                 let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-                    NvsFlash::new(NVS_FLASH_OFFSET),
+                    NvsFlash::new(settings.flash_offset),
                     &mut read_buf,
-                    NVS_FLASH_SIZE,
+                    settings.flash_size,
                 );
                 _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
                 _ = nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes());
@@ -204,7 +219,7 @@ async fn bluetooth_task(
             }
         }
 
-        if last_scan.elapsed().as_millis() >= 15000 {
+        if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
             let mut scan_str = String::<256>::new();
             let dsa = controller.scan_with_config::<10>(Default::default()).await;
             if let Ok((dsa, count)) = dsa {
@@ -322,8 +337,6 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
 
                     let wifi_connected = WIFI_CONN_RES_SIG.wait().await;
                     if wifi_connected {
-                        // TODO: save ssid and psk to flash
-
                         break 'outer;
                     }
                 }
@@ -336,6 +349,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
 
 #[embassy_executor::task]
 async fn connection(
+    wifi_reconnect_time: u64,
     mut controller: WifiController<'static>,
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
@@ -354,7 +368,7 @@ async fn connection(
 
             // wait until we're no longer connected
             controller.wait_for_event(WifiEvent::StaDisconnected).await;
-            Timer::after(Duration::from_millis(WIFI_RECONNECT_TIMEOUT)).await
+            Timer::after(Duration::from_millis(wifi_reconnect_time)).await
         }
 
         match controller.connect().await {
@@ -364,7 +378,7 @@ async fn connection(
             }
             Err(e) => {
                 log::info!("Failed to connect to wifi: {e:?}");
-                Timer::after(Duration::from_millis(WIFI_RECONNECT_TIMEOUT)).await
+                Timer::after(Duration::from_millis(wifi_reconnect_time)).await
             }
         }
     }
