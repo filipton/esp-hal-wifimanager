@@ -2,9 +2,8 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use core::hash::{Hash, Hasher};
-
 use embassy_executor::Spawner;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embassy_time::Timer;
 use embedded_storage::{ReadStorage, Storage};
 use esp_backtrace as _;
@@ -55,15 +54,16 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(&clocks, timg0);
 
     let mut read_buf: [u8; 1024] = [0; 1024];
-    let mut nvs = TicKV::<NvsFlash, 1024>::new(NvsFlash::new(), &mut read_buf, 0x6000);
+    let nvs = TicKV::<NvsFlash, 1024>::new(NvsFlash::new(), &mut read_buf, 0x6000);
 
-    let mut hasher = hasher::SimpleHasher::new();
-    tickv::MAIN_KEY.hash(&mut hasher);
-    log::info!("{:?}", nvs.initialise(hasher.finish()));
+    log::info!("{:?}", nvs.initialise(hasher::hash(tickv::MAIN_KEY)));
+
+    //let buf: [u8; 32] = [69; 32];
+    //log::info!("{:?}", nvs.append_key(hasher::hash(b"ONE"), &buf));
 
     // Get the same key back
     let mut buf: [u8; 32] = [0; 32];
-    log::info!("{:?}", nvs.get_key(get_hashed_key(b"ONE"), &mut buf));
+    log::info!("{:?}", nvs.get_key(hasher::hash(b"ONE"), &mut buf));
     log::info!("buf: {:?}", buf);
 
     //esp_hal_wifimanager::init_wm(init, peripherals.WIFI, peripherals.BT, &spawner).await;
@@ -73,46 +73,52 @@ async fn main(spawner: Spawner) {
     }
 }
 
-fn get_hashed_key(buf: &[u8]) -> u64 {
-    let mut hasher = hasher::SimpleHasher::new();
-    buf.hash(&mut hasher);
-    hasher.finish()
-}
-
 pub struct NvsFlash {
-    flash: esp_storage::FlashStorage,
+    flash: Mutex<CriticalSectionRawMutex, esp_storage::FlashStorage>,
 }
 
 impl NvsFlash {
     fn new() -> Self {
         Self {
-            flash: esp_storage::FlashStorage::new(),
+            flash: Mutex::new(esp_storage::FlashStorage::new()),
         }
     }
 }
 
 impl FlashController<1024> for NvsFlash {
     fn read_region(
-        &mut self,
+        &self,
         region_number: usize,
         offset: usize,
         buf: &mut [u8; 1024],
     ) -> Result<(), tickv::ErrorCode> {
-        let offset = region_number * 1024 + offset;
-        self.flash
-            .read(0x00009000 + offset as u32, buf)
-            .map_err(|_| tickv::ErrorCode::ReadFail)
+        if let Ok(mut flash) = self.flash.try_lock() {
+            let offset = region_number * 1024 + offset;
+            flash
+                .read(0x00009000 + offset as u32, buf)
+                .map_err(|_| tickv::ErrorCode::ReadFail)
+        } else {
+            Err(tickv::ErrorCode::ReadFail)
+        }
     }
 
-    fn write(&mut self, address: usize, buf: &[u8]) -> Result<(), tickv::ErrorCode> {
-        self.flash
-            .write(0x00009000 + address as u32, buf)
-            .map_err(|_| tickv::ErrorCode::WriteFail)
+    fn write(&self, address: usize, buf: &[u8]) -> Result<(), tickv::ErrorCode> {
+        if let Ok(mut flash) = self.flash.try_lock() {
+            flash
+                .write(0x00009000 + address as u32, buf)
+                .map_err(|_| tickv::ErrorCode::WriteFail)
+        } else {
+            Err(tickv::ErrorCode::WriteFail)
+        }
     }
 
-    fn erase_region(&mut self, region_number: usize) -> Result<(), tickv::ErrorCode> {
-        self.flash
-            .write(0x00009000 + (region_number as u32 * 1024), &[0xFF; 1024])
-            .map_err(|_| tickv::ErrorCode::EraseFail)
+    fn erase_region(&self, region_number: usize) -> Result<(), tickv::ErrorCode> {
+        if let Ok(mut flash) = self.flash.try_lock() {
+            flash
+                .write(0x00009000 + (region_number as u32 * 1024), &[0xFF; 1024])
+                .map_err(|_| tickv::ErrorCode::EraseFail)
+        } else {
+            Err(tickv::ErrorCode::EraseFail)
+        }
     }
 }

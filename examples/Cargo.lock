@@ -648,8 +648,10 @@ dependencies = [
  "embassy-net",
  "embassy-sync 0.6.0",
  "embassy-time",
+ "embedded-storage",
  "esp-hal",
  "esp-hal-embassy",
+ "esp-storage",
  "esp-wifi",
  "heapless",
  "log",
@@ -1435,9 +1437,8 @@ dependencies = [
 [[package]]
 name = "tickv"
 version = "1.0.0"
-dependencies = [
- "log",
-]
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c61f292d344c68f447d717efc2ebb9b5e9de3c859fef183dd2ab69fa5897f08a"
 
 [[package]]
 name = "toml"
@@ -1561,6 +1562,7 @@ dependencies = [
  "dotenvy",
  "embassy-executor",
  "embassy-net",
+ "embassy-sync 0.6.0",
  "embassy-time",
  "embedded-storage",
  "esp-backtrace",
