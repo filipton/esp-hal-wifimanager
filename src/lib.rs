@@ -25,12 +25,17 @@ use esp_wifi::{
     EspWifiInitialization,
 };
 use heapless::{String, Vec};
+use nvs::NvsFlash;
+
+mod nvs;
 
 // Hardcoded values
 // const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
 // const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
 
 // TODO: maybe add some settings struct
+const NVS_FLASH_SIZE: usize = 0x6000;
+const NVS_FLASH_OFFSET: usize = 0x9000;
 const WIFI_CONNECTION_TIMEOUT: u64 = 15_000; //ms (time after ble server spawns)
 const WIFI_RECONNECT_TIMEOUT: u64 = 1000; //ms
 
@@ -69,21 +74,48 @@ pub async fn init_wm(init: EspWifiInitialization, wifi: WIFI, bt: BT, spawner: &
         make_static!(StackResources::<3>::new()),
         seed,
     ));
-
-    // TODO: read flash to get ssid an psk
-    let client_config = Configuration::Client(ClientConfiguration {
-        ssid: "".try_into().expect("Wifi ssid parse"),
-        password: "".try_into().expect("Wifi psk parse"),
-        ..Default::default()
-    });
-    controller.set_configuration(&client_config).unwrap();
-    log::info!("Starting wifi");
     controller.start().await.unwrap();
-    log::info!("Wifi started!");
 
-    let wifi_connected = try_to_wifi_connect(&mut controller).await;
-    if !wifi_connected {
-        // this will "block" it has loop
+    let mut read_buf: [u8; 1024] = [0; 1024];
+    let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
+        NvsFlash::new(NVS_FLASH_OFFSET),
+        &mut read_buf,
+        NVS_FLASH_SIZE,
+    );
+    _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
+
+    let mut ssid_buf = [0; 32];
+    let mut ssid = String::<32>::new();
+    if nvs.get_key(nvs::hash(b"WIFI_SSID"), &mut ssid_buf).is_ok() {
+        if let Ok(s) = core::str::from_utf8(&ssid_buf) {
+            _ = ssid.push_str(s);
+        }
+    }
+
+    let mut psk_buf = [0; 64];
+    let mut psk = String::<64>::new();
+    if nvs.get_key(nvs::hash(b"WIFI_PSK"), &mut psk_buf).is_ok() {
+        if let Ok(s) = core::str::from_utf8(&psk_buf) {
+            _ = psk.push_str(s);
+        }
+    }
+
+    drop(nvs);
+
+    if ssid.len() > 0 && psk.len() > 0 {
+        let client_config = Configuration::Client(ClientConfiguration {
+            ssid,
+            password: psk,
+            ..Default::default()
+        });
+        controller.set_configuration(&client_config).unwrap();
+
+        let wifi_connected = try_to_wifi_connect(&mut controller).await;
+        if !wifi_connected {
+            // this will "block" it has loop
+            bluetooth_task(&spawner, init, bt, &mut controller).await;
+        }
+    } else {
         bluetooth_task(&spawner, init, bt, &mut controller).await;
     }
 
@@ -149,8 +181,8 @@ async fn bluetooth_task(
             log::warn!("trying to connect to: {:?}", conn_info);
 
             let client_config = Configuration::Client(ClientConfiguration {
-                ssid: conn_info.ssid,
-                password: conn_info.psk,
+                ssid: conn_info.ssid.clone(),
+                password: conn_info.psk.clone(),
                 ..Default::default()
             });
             controller.set_configuration(&client_config).unwrap();
@@ -158,6 +190,16 @@ async fn bluetooth_task(
             let wifi_connected = try_to_wifi_connect(controller).await;
             WIFI_CONN_RES_SIG.signal(wifi_connected);
             if wifi_connected {
+                let mut read_buf: [u8; 1024] = [0; 1024];
+                let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
+                    NvsFlash::new(NVS_FLASH_OFFSET),
+                    &mut read_buf,
+                    NVS_FLASH_SIZE,
+                );
+                _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
+                _ = nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes());
+                _ = nvs.append_key(nvs::hash(b"WIFI_PSK"), conn_info.psk.as_bytes());
+
                 break;
             }
         }

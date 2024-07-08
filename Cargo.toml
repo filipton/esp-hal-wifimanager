@@ -17,6 +17,9 @@ embassy-time = { version = "0.3.1", default-features = false }
 embassy-executor = { version = "0.5.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false }
 embassy-sync = { version = "0.6.0", default-features = false }
+esp-storage = { version = "0.3.0", features = ["esp32s3"] }
+embedded-storage = "0.3.1"
+tickv = "1.0.0"
 
 [patch.crates-io]
 esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", package = "esp-hal" } 

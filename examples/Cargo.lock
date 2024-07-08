@@ -656,6 +656,7 @@ dependencies = [
  "heapless",
  "log",
  "static_cell",
+ "tickv",
 ]
 
 [[package]]
@@ -1562,7 +1563,6 @@ dependencies = [
  "dotenvy",
  "embassy-executor",
  "embassy-net",
- "embassy-sync 0.6.0",
  "embassy-time",
  "embedded-storage",
  "esp-backtrace",
@@ -1575,7 +1575,6 @@ dependencies = [
  "heapless",
  "log",
  "static_cell",
- "tickv",
 ]
 
 [[package]]
