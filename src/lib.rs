@@ -255,7 +255,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
             .cmd_set_le_advertising_data(
                 create_advertising_data(&[
                     AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
+                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0xf254)]),
                     AdStructure::CompleteLocalName(name.as_str()),
                 ])
                 .unwrap(),

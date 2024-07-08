@@ -10,20 +10,14 @@
         async function req() {
             device = await navigator.bluetooth.requestDevice({
                 filters: [{
-                    namePrefix: 'FKM-'
+                    services: [0xf254]
                 }],
-                optionalServices: ['937312e0-2354-11eb-9f10-fbc30a62cf38'],
-                //acceptAllDevices: true,
-                /*
-                filters: [{
-                    services: ['937312e0-2354-11eb-9f10-fbc30a62cf38']
-                }]
-                */
+                optionalServices: ['f254a578-ef88-4372-b5f5-5ecf87e65884']
             });
 
             server = await device.gatt.connect();
-            service = await server.getPrimaryService('937312e0-2354-11eb-9f10-fbc30a62cf38');
-            characteristic = await service.getCharacteristic('937312e0-2354-11eb-9f10-fbc30a62cf38');
+            service = await server.getPrimaryService('f254a578-ef88-4372-b5f5-5ecf87e65884');
+            characteristic = await service.getCharacteristic('bcd7e573-b0b2-4775-83c0-acbf3aaf210c');
 
             const value = await characteristic.readValue();
             const decoder = new TextDecoder('utf-8');
