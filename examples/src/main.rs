@@ -63,6 +63,7 @@ async fn main(spawner: Spawner) {
         &spawner,
     )
     .await;
+
     loop {
         log::info!("bump {}", esp_hal::time::current_time());
         Timer::after_millis(1000).await;

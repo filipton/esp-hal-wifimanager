@@ -7,6 +7,21 @@
         let service = null;
         let characteristic = null;
 
+        function showScanRes(res) {
+            document.getElementById('res').innerText = "";
+
+            let wifis = res.split("\n");
+            for (let wifi of wifis) {
+                let split = wifi.split(": ");
+                if (split.length != 2) continue;
+
+                let ssid = split[0];
+                let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100)
+
+                document.getElementById('res').innerText += `${ssid} | ${power}%\n`;
+            }
+        }
+
         async function req() {
             device = await navigator.bluetooth.requestDevice({
                 filters: [{
@@ -21,12 +36,11 @@
 
             const value = await characteristic.readValue();
             const decoder = new TextDecoder('utf-8');
-            document.getElementById('res').innerText = decoder.decode(value);
+            showScanRes(decoder.decode(value));
             setInterval(async () => {
-                document.getElementById('res').innerText = "";
                 const value = await characteristic.readValue();
                 const decoder = new TextDecoder('utf-8');
-                document.getElementById('res').innerText = decoder.decode(value);
+                showScanRes(decoder.decode(value));
             }, 5000);
         }
 

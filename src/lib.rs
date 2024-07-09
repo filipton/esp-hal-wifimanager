@@ -29,6 +29,9 @@ use nvs::NvsFlash;
 
 mod nvs;
 
+// TODO: maybe add way to modify this using WmSettings struct 
+// (just use cargo expand and copy resulting gatt_attributes)
+//
 // Hardcoded values
 // const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
 // const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
