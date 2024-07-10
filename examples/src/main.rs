@@ -6,8 +6,11 @@ use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl, peripherals::Peripherals, prelude::*, system::SystemControl,
-    timer::timg::TimerGroup,
+    clock::ClockControl,
+    peripherals::Peripherals,
+    prelude::*,
+    system::SystemControl,
+    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer},
 };
 
 // TODO: maybe i should make another crate for this make_static?
@@ -17,6 +20,15 @@ macro_rules! make_static {
         type T = impl ::core::marker::Sized;
         static STATIC_CELL: static_cell::StaticCell<T> = static_cell::StaticCell::new();
         STATIC_CELL.uninit().write($val)
+    }};
+}
+
+macro_rules! mk_static {
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write(($val));
+        x
     }};
 }
 
@@ -35,18 +47,25 @@ async fn main(spawner: Spawner) {
     log::set_max_level(log::LevelFilter::Info);
 
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timer = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG1, &clocks, None);
+    let timer = PeriodicTimer::new(
+        esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks, None)
+            .timer0
+            .into(),
+    );
     let init = esp_wifi::initialize(
         esp_wifi::EspWifiInitFor::WifiBle,
-        timer.timer0,
+        timer,
         rng.clone(),
         peripherals.RADIO_CLK,
         &clocks,
     )
     .unwrap();
 
-    let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
-    esp_hal_embassy::init(&clocks, timg0);
+    let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
+    let timer0 = OneShotTimer::new(timg1.timer0.into());
+    let timers = [timer0];
+    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
+    esp_hal_embassy::init(&clocks, timers);
 
     let wifi_res = esp_hal_wifimanager::init_wm(
         esp_hal_wifimanager::WmSettings::default(),
