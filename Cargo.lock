@@ -524,7 +524,7 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 [[package]]
 name = "esp-build"
 version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "quote",
  "syn 2.0.68",
@@ -534,7 +534,7 @@ dependencies = [
 [[package]]
 name = "esp-hal"
 version = "0.18.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "basic-toml",
  "bitfield 0.15.0",
@@ -577,7 +577,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-embassy"
 version = "0.1.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "cfg-if",
  "critical-section",
@@ -592,7 +592,7 @@ dependencies = [
 [[package]]
 name = "esp-hal-procmacros"
 version = "0.11.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "darling",
  "document-features",
@@ -628,7 +628,7 @@ dependencies = [
 [[package]]
 name = "esp-metadata"
 version = "0.1.1"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "basic-toml",
  "lazy_static",
@@ -639,7 +639,7 @@ dependencies = [
 [[package]]
 name = "esp-riscv-rt"
 version = "0.8.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "document-features",
  "riscv",
@@ -672,7 +672,7 @@ dependencies = [
 [[package]]
 name = "esp-wifi"
 version = "0.6.0"
-source = "git+https://github.com/esp-rs/esp-hal#967c478846a501bfac2f54a3eade158586aed7d3"
+source = "git+https://github.com/esp-rs/esp-hal?rev=2bef914e7c01b5ea598bff79caa4d4b3f0f99faa#2bef914e7c01b5ea598bff79caa4d4b3f0f99faa"
 dependencies = [
  "atomic-waker",
  "cfg-if",

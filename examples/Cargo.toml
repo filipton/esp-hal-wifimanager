@@ -10,8 +10,8 @@ esp-backtrace = { version = "0.12.1", features = [ "esp32s3", "exception-handler
 esp-hal = { version = "0.18.0", features = [ "esp32s3", "async" ] }
 esp-println = { version = "0.9.1", features = ["esp32s3", "log"] }
 log = { version = "0.4.22" }
-esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", package = "esp-wifi", features = [ "esp32s3", "phy-enable-usb", "coex" ] }
-esp-hal-embassy = { version = "0.1.0", features = ["time-timg0", "integrated-timers", "esp32s3"] }
+esp-wifi = { git = "https://github.com/esp-rs/esp-hal.git", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-wifi", features = [ "esp32s3", "phy-enable-usb", "coex" ] }
+esp-hal-embassy = { version = "0.1.0", features = ["integrated-timers", "esp32s3"] }
 embassy-executor = { version = "0.5.0", package = "embassy-executor", features = ["arch-riscv32", "task-arena-size-10240"] }
 embassy-net = { version = "0.4.0", features = ["tcp", "udp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
 embassy-time = { version = "0.3.1" }
@@ -22,8 +22,8 @@ static_cell = { version = "2.1.0", features = ["nightly"] }
 heapless = { version = "0.8.0", default-features = false }
 
 [patch.crates-io]
-esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", package = "esp-hal" } 
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", package = "esp-hal-embassy" } 
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-hal" } 
+esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-hal-embassy" } 
 
 [build-dependencies]
 dotenvy = "0.15.7"
