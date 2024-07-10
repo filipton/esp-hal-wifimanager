@@ -23,15 +23,6 @@ macro_rules! make_static {
     }};
 }
 
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
-        x
-    }};
-}
-
 #[main]
 async fn main(spawner: Spawner) {
     let peripherals = Peripherals::take();
@@ -64,7 +55,7 @@ async fn main(spawner: Spawner) {
     let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
     let timer0 = OneShotTimer::new(timg1.timer0.into());
     let timers = [timer0];
-    let timers = mk_static!([OneShotTimer<ErasedTimer>; 1], timers);
+    let timers: &mut [OneShotTimer<ErasedTimer>; 1] = make_static!(timers);
     esp_hal_embassy::init(&clocks, timers);
 
     let wifi_res = esp_hal_wifimanager::init_wm(
