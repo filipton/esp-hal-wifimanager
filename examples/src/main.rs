@@ -48,7 +48,7 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     esp_hal_embassy::init(&clocks, timg0);
 
-    esp_hal_wifimanager::init_wm(
+    let wifi_res = esp_hal_wifimanager::init_wm(
         esp_hal_wifimanager::WmSettings {
             flash_offset: 0x9000,
             flash_size: 0x6000,
@@ -63,6 +63,8 @@ async fn main(spawner: Spawner) {
         &spawner,
     )
     .await;
+
+    log::info!("wifi_res: {wifi_res:?}");
 
     loop {
         log::info!("bump {}", esp_hal::time::current_time());

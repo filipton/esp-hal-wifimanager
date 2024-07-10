@@ -29,7 +29,21 @@ use nvs::NvsFlash;
 
 mod nvs;
 
-// TODO: maybe add way to modify this using WmSettings struct 
+#[derive(Debug)]
+pub enum WmError {
+    /// TODO: add connection timeout (time after which init_wm returns WmTimeout error
+    WmTimeout,
+
+    WifiControllerStartError,
+    FlashError(tickv::ErrorCode),
+    WifiError(esp_wifi::wifi::WifiError),
+    WifiTaskSpawnError,
+    BtTaskSpawnError,
+}
+
+pub type Result<T> = core::result::Result<T, WmError>;
+
+// TODO: maybe add way to modify this using WmSettings struct
 // (just use cargo expand and copy resulting gatt_attributes)
 //
 // Hardcoded values
@@ -74,9 +88,10 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) {
+) -> Result<()> {
     let (wifi_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
+        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
+            .map_err(|e| WmError::WifiError(e))?;
 
     let config = Config::dhcpv4(Default::default());
     let seed = settings.wifi_seed;
@@ -87,7 +102,10 @@ pub async fn init_wm(
         make_static!(StackResources::<3>::new()),
         seed,
     ));
-    controller.start().await.unwrap();
+    controller
+        .start()
+        .await
+        .map_err(|e| WmError::WifiError(e))?;
 
     let mut read_buf: [u8; 1024] = [0; 1024];
     let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
@@ -95,7 +113,8 @@ pub async fn init_wm(
         &mut read_buf,
         settings.flash_size,
     );
-    _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
+    nvs.initialise(nvs::hash(tickv::MAIN_KEY))
+        .map_err(|e| WmError::FlashError(e))?;
 
     let mut ssid_buf = [0; 32];
     let mut ssid = String::<32>::new();
@@ -122,21 +141,29 @@ pub async fn init_wm(
             password: psk,
             ..Default::default()
         });
-        controller.set_configuration(&client_config).unwrap();
+
+        controller
+            .set_configuration(&client_config)
+            .map_err(|e| WmError::WifiError(e))?;
 
         let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
-            bluetooth_task(settings, &spawner, init, bt, &mut controller).await;
+            bluetooth_task(settings, &spawner, init, bt, &mut controller).await?;
         }
     } else {
-        bluetooth_task(settings, &spawner, init, bt, &mut controller).await;
+        bluetooth_task(settings, &spawner, init, bt, &mut controller).await?;
     }
 
     spawner
         .spawn(connection(wifi_reconnect_time, controller, stack))
-        .expect("connection spawn");
-    spawner.spawn(net_task(stack)).expect("net task spawn");
+        .map_err(|_| WmError::WifiTaskSpawnError)?;
+
+    spawner
+        .spawn(net_task(stack))
+        .map_err(|_| WmError::WifiTaskSpawnError)?;
+
+    Ok(())
 }
 
 async fn try_to_wifi_connect(
@@ -180,7 +207,7 @@ async fn bluetooth_task(
     init: EspWifiInitialization,
     bt: BT,
     controller: &mut WifiController<'static>,
-) {
+) -> Result<()> {
     // TODO: name should be passed as parameter outside the lib
     let mut generated_name = String::<31>::new();
     _ = core::fmt::write(
@@ -190,7 +217,7 @@ async fn bluetooth_task(
 
     spawner
         .spawn(bluetooth(init, bt, generated_name))
-        .expect("ble task spawn");
+        .map_err(|_| WmError::BtTaskSpawnError)?;
 
     let mut last_scan = Instant::MIN;
     loop {
@@ -203,7 +230,9 @@ async fn bluetooth_task(
                 password: conn_info.psk.clone(),
                 ..Default::default()
             });
-            controller.set_configuration(&client_config).unwrap();
+            controller
+                .set_configuration(&client_config)
+                .map_err(|e| WmError::WifiError(e))?;
 
             let wifi_connected = try_to_wifi_connect(controller, &settings).await;
             WIFI_CONN_RES_SIG.signal(wifi_connected);
@@ -214,11 +243,17 @@ async fn bluetooth_task(
                     &mut read_buf,
                     settings.flash_size,
                 );
-                _ = nvs.initialise(nvs::hash(tickv::MAIN_KEY));
-                _ = nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes());
-                _ = nvs.append_key(nvs::hash(b"WIFI_PSK"), conn_info.psk.as_bytes());
 
-                break;
+                nvs.initialise(nvs::hash(tickv::MAIN_KEY))
+                    .map_err(|e| WmError::FlashError(e))?;
+
+                nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes())
+                    .map_err(|e| WmError::FlashError(e))?;
+
+                nvs.append_key(nvs::hash(b"WIFI_PSK"), conn_info.psk.as_bytes())
+                    .map_err(|e| WmError::FlashError(e))?;
+
+                return Ok(());
             }
         }
 
@@ -261,7 +296,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
                     AdStructure::ServiceUuids16(&[Uuid::Uuid16(0xf254)]),
                     AdStructure::CompleteLocalName(name.as_str()),
                 ])
-                .unwrap(),
+                .expect("create_advertising_data error"),
             )
             .await;
 
