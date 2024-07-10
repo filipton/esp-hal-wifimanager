@@ -7,7 +7,7 @@ If it can't connect to wifi it spawns BLE server. (You can use chrome on android
 Currently esp-hal (esp-wifi) doesn't support AP with "dhcp server".
 
 ## Simple example
-Add this to your Cargo.toml:
+Add this to your Cargo.toml (note also add `embassy`, its only for async):
 ```toml
 [dependencies]
 esp-hal = { version = "0.18.0", features = [ "esp32s3", "async" ] }

@@ -8,7 +8,7 @@
         let characteristic = null;
 
         function showScanRes(res) {
-            document.getElementById('res').innerText = "";
+            document.getElementById('res').innerHTML = "";
 
             let wifis = res.split("\n");
             for (let wifi of wifis) {
@@ -18,7 +18,7 @@
                 let ssid = split[0];
                 let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100)
 
-                document.getElementById('res').innerText += `${ssid} | ${power}%\n`;
+                document.getElementById('res').innerHTML += `<span style="cursor: pointer;" onclick="selectSSID('${ssid}')">${ssid} | ${power}%</span> <br />`;
             }
         }
 
@@ -44,17 +44,27 @@
             }, 5000);
         }
 
-        async function conn() {
+        async function formSubmit(e) {
+            e.preventDefault();
+
             if (characteristic === null) {
-                return;
+                return false;
             }
 
-            let ssid = "";
-            let psk = "";
+            let ssidInput = document.getElementById("inp-ssid");
+            let pskInput = document.getElementById("inp-psk");
 
             const encoder = new TextEncoder('utf-8');
-            const value = encoder.encode(ssid + '\0' + psk + '\0');
+            const value = encoder.encode(ssidInput.value + '\0' + pskInput.value + '\0');
+            console.log(ssidInput.value + '\0' + pskInput.value + '\0');
             await characteristic.writeValue(value);
+
+            return false;
+        }
+
+        function selectSSID(ssid) {
+            let ssidInput = document.getElementById("inp-ssid");
+            ssidInput.value = ssid;
         }
     </script>
 </head>
@@ -62,10 +72,34 @@
 <body>
     <button onclick="req()">REQ</button>
 
-    <h1>RES:</h1>
-    <p id="res"></p>
+    <h1>WIFIS:</h1>
+    <div id="res"></div>
 
-    <button onclick="conn()">CONNECT</button>
+    <br />
+    <br />
+    <br />
+
+    <form onsubmit="formSubmit(event)">
+        <label>
+            SSID:
+            <input type="text" value="" placeholder="Enter SSID" id="inp-ssid" />
+        </label>
+
+        <br />
+
+        <label>
+            PASSWORD:
+            <input type="new-password" value="" placeholder="Enter PASSWORD" id="inp-psk" />
+        </label>
+
+        <br />
+
+        <input type="submit" value="Connect" />
+    </form>
+
+    <script>
+        showScanRes("FunBox2-8646: -75\nezz: -27");
+    </script>
 </body>
 
 </html>
