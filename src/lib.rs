@@ -10,7 +10,6 @@ use bleps::{
     attribute_server::WorkResult,
     gatt,
 };
-
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
@@ -26,22 +25,12 @@ use esp_wifi::{
 };
 use heapless::{String, Vec};
 use nvs::NvsFlash;
+use structs::{Result, WifiSigData};
+
+pub use structs::{WmError, WmSettings};
 
 mod nvs;
-
-#[derive(Debug)]
-pub enum WmError {
-    /// TODO: add connection timeout (time after which init_wm returns WmTimeout error
-    WmTimeout,
-
-    WifiControllerStartError,
-    FlashError(tickv::ErrorCode),
-    WifiError(esp_wifi::wifi::WifiError),
-    WifiTaskSpawnError,
-    BtTaskSpawnError,
-}
-
-pub type Result<T> = core::result::Result<T, WmError>;
+mod structs;
 
 // TODO: maybe add way to modify this using WmSettings struct
 // (just use cargo expand and copy resulting gatt_attributes)
@@ -50,16 +39,6 @@ pub type Result<T> = core::result::Result<T, WmError>;
 // const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
 // const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
 
-#[derive(Clone, Debug)]
-pub struct WmSettings {
-    pub flash_size: usize,
-    pub flash_offset: usize,
-    pub wifi_conn_timeout: u64,
-    pub wifi_reconnect_time: u64,
-    pub wifi_scan_interval: u64,
-    pub wifi_seed: u64,
-}
-
 /// This is macro from static_cell (static_cell::make_static!) but without weird stuff
 macro_rules! make_static {
     ($val:expr) => {{
@@ -67,12 +46,6 @@ macro_rules! make_static {
         static STATIC_CELL: static_cell::StaticCell<T> = static_cell::StaticCell::new();
         STATIC_CELL.uninit().write($val)
     }};
-}
-
-#[derive(Debug, Clone)]
-pub struct WifiSigData {
-    ssid: String<32>,
-    psk: String<64>,
 }
 
 static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());

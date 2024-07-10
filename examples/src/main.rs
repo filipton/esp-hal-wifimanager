@@ -49,14 +49,7 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(&clocks, timg0);
 
     let wifi_res = esp_hal_wifimanager::init_wm(
-        esp_hal_wifimanager::WmSettings {
-            flash_offset: 0x9000,
-            flash_size: 0x6000,
-            wifi_seed: 69420,
-            wifi_reconnect_time: 1000,
-            wifi_conn_timeout: 15000,
-            wifi_scan_interval: 15000,
-        },
+        esp_hal_wifimanager::WmSettings::default(),
         init,
         peripherals.WIFI,
         peripherals.BT,
