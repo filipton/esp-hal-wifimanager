@@ -39,15 +39,6 @@ mod structs;
 // const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
 // const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
 
-/// This is macro from static_cell (static_cell::make_static!) but without weird stuff
-macro_rules! make_static {
-    ($val:expr) => {{
-        type T = impl ::core::marker::Sized;
-        static STATIC_CELL: static_cell::StaticCell<T> = static_cell::StaticCell::new();
-        STATIC_CELL.uninit().write($val)
-    }};
-}
-
 static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());
 /// This is used to tell main task to connect to wifi
 static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, WifiSigData> = Signal::new();
@@ -69,12 +60,21 @@ pub async fn init_wm(
     let config = Config::dhcpv4(Default::default());
     let seed = settings.wifi_seed;
 
-    let stack = &*make_static!(Stack::new(
-        wifi_interface,
-        config,
-        make_static!(StackResources::<3>::new()),
-        seed,
-    ));
+    let stack = &*{
+        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
+            static_cell::StaticCell::new();
+        STATIC_CELL.uninit().write(Stack::new(
+            wifi_interface,
+            config,
+            {
+                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                    static_cell::StaticCell::new();
+                STATIC_CELL.uninit().write(StackResources::<3>::new())
+            },
+            seed,
+        ))
+    };
+
     controller
         .start()
         .await

@@ -17,7 +17,7 @@ embassy-net = { version = "0.4.0", features = ["tcp", "udp", "dhcpv4", "medium-e
 embassy-time = { version = "0.3.1" }
 esp-storage = { version = "0.3.0", features = ["esp32s3"] }
 embedded-storage = "0.3.1"
-esp-hal-wifimanager = { path = "../" }
+esp-hal-wifimanager = { path = "../", features = ["esp32s3"] }
 static_cell = { version = "2.1.0", features = ["nightly"] }
 heapless = { version = "0.8.0", default-features = false }
 

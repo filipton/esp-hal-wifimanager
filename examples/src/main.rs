@@ -6,11 +6,7 @@ use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl,
-    peripherals::Peripherals,
-    prelude::*,
-    system::SystemControl,
-    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer},
+    clock::ClockControl, peripherals::Peripherals, prelude::*, rtc_cntl::Rtc, system::SystemControl, timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer}
 };
 
 // TODO: maybe i should make another crate for this make_static?
@@ -27,12 +23,15 @@ macro_rules! make_static {
 async fn main(spawner: Spawner) {
     let peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks =
-        ClockControl::configure(system.clock_control, esp_hal::clock::CpuClock::Clock80MHz)
-            .freeze();
-
-    //let clocks = ClockControl::max(system.clock_control).freeze();
+    let clocks = ClockControl::max(system.clock_control).freeze();
     let clocks = &*make_static!(clocks);
+
+    /*
+    let mut rtc = Rtc::new(peripherals.LPWR, None);
+    rtc.rwdt.set_timeout(2.secs());
+    rtc.rwdt.enable();
+    log::info!("RWDT watchdog enabled!");
+    */
 
     esp_println::logger::init_logger_from_env();
     log::set_max_level(log::LevelFilter::Info);
@@ -44,7 +43,7 @@ async fn main(spawner: Spawner) {
             .into(),
     );
     let init = esp_wifi::initialize(
-        esp_wifi::EspWifiInitFor::WifiBle,
+        esp_wifi::EspWifiInitFor::Wifi,
         timer,
         rng.clone(),
         peripherals.RADIO_CLK,
@@ -70,7 +69,8 @@ async fn main(spawner: Spawner) {
     log::info!("wifi_res: {wifi_res:?}");
 
     loop {
+        //rtc.rwdt.feed();
         log::info!("bump {}", esp_hal::time::current_time());
-        Timer::after_millis(1000).await;
+        Timer::after_millis(10).await;
     }
 }
