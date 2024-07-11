@@ -31,21 +31,9 @@ pub(crate) struct WifiSigData {
 }
 
 impl WmSettings {
-    #[cfg(feature = "esp32s3")]
-    /// Defaults for esp32s3 (with defaut partition schema)
-    pub fn default() -> Self {
-        Self {
-            flash_offset: 0x9000,
-            flash_size: 0x6000,
-            wifi_seed: 69420,
-            wifi_reconnect_time: 1000,
-            wifi_conn_timeout: 15000,
-            wifi_scan_interval: 15000,
-        }
-    }
-
-    #[cfg(feature = "esp32c3")]
-    /// Defaults for esp32c3 (with defaut partition schema)
+    /// Defaults for esp32 (with defaut partition schema)
+    ///
+    /// Checked on esp32s3 and esp32c3
     pub fn default() -> Self {
         Self {
             flash_offset: 0x9000,
