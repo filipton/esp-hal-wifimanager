@@ -91,7 +91,6 @@ async fn main(spawner: Spawner) {
     )
     .unwrap();
 
-    /*
     let wifi_res = esp_hal_wifimanager::init_wm(
         esp_hal_wifimanager::WmSettings::default(),
         init,
@@ -102,7 +101,6 @@ async fn main(spawner: Spawner) {
     .await;
 
     log::info!("wifi_res: {wifi_res:?}");
-    */
 
     loop {
         //rtc.rwdt.feed();
