@@ -6,10 +6,10 @@ edition = "2021"
 [lib]
 
 [dependencies]
-esp-hal = { version = "0.18.0", default-features = false, features = ["async"] }
-esp-hal-embassy = { version = "0.1.0", default-features = false, features = [] }
+esp-hal = { version = "0.19.0", default-features = false, features = ["async"] }
+esp-hal-embassy = { version = "0.2.0", default-features = false, features = [] }
 embassy-net = { version = "0.4.0", default-features = false, features = ["tcp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
-esp-wifi = { git = "https://github.com/esp-rs/esp-hal", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-wifi", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
+esp-wifi = { version = "0.7.1", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
 bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
 static_cell = { version = "2.1.0", features = ["nightly"] }
 log = "0.4.22"
@@ -20,10 +20,6 @@ embassy-sync = { version = "0.6.0", default-features = false }
 esp-storage = { version = "0.3.0", features = [] }
 embedded-storage = "0.3.1"
 tickv = "1.0.0"
-
-[patch.crates-io]
-esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-hal" } 
-esp-hal-embassy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "2bef914e7c01b5ea598bff79caa4d4b3f0f99faa", package = "esp-hal-embassy" } 
 
 [features]
 default = []

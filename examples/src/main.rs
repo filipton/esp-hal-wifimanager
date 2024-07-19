@@ -6,7 +6,12 @@ use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_hal::{
-    clock::ClockControl, peripherals::Peripherals, prelude::*, rtc_cntl::Rtc, system::SystemControl, timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer}
+    clock::ClockControl,
+    peripheral::Peripheral,
+    peripherals::Peripherals,
+    prelude::*,
+    system::SystemControl,
+    timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer},
 };
 
 // TODO: maybe i should make another crate for this make_static?
@@ -21,9 +26,13 @@ macro_rules! make_static {
 
 #[main]
 async fn main(spawner: Spawner) {
-    let peripherals = Peripherals::take();
+    let mut peripherals = Peripherals::take();
     let system = SystemControl::new(peripherals.SYSTEM);
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    //let clocks = ClockControl::max(system.clock_control).freeze();
+    let clocks =
+        ClockControl::configure(system.clock_control, esp_hal::clock::CpuClock::Clock80MHz)
+            .freeze();
+
     let clocks = &*make_static!(clocks);
 
     /*
@@ -36,7 +45,38 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();
     log::set_max_level(log::LevelFilter::Info);
 
+    let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
+    let timer0 = OneShotTimer::new(timg1.timer0.into());
+    let timers = [timer0];
+    let timers: &mut [OneShotTimer<ErasedTimer>; 1] = make_static!(timers);
+    esp_hal_embassy::init(&clocks, timers);
+
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
+
+    unsafe {
+        let timg0 = peripherals.TIMG0.clone_unchecked();
+        let radio_clk = peripherals.RADIO_CLK.clone_unchecked();
+
+        let timer = PeriodicTimer::new(
+            esp_hal::timer::timg::TimerGroup::new(timg0, &clocks, None)
+                .timer0
+                .into(),
+        );
+        let init = esp_wifi::initialize(
+            esp_wifi::EspWifiInitFor::WifiBle,
+            timer,
+            rng.clone(),
+            radio_clk,
+            &clocks,
+        )
+        .unwrap();
+
+        Timer::after_millis(5000).await;
+
+        drop(init);
+    }
+
+
     let timer = PeriodicTimer::new(
         esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks, None)
             .timer0
@@ -51,12 +91,7 @@ async fn main(spawner: Spawner) {
     )
     .unwrap();
 
-    let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
-    let timer0 = OneShotTimer::new(timg1.timer0.into());
-    let timers = [timer0];
-    let timers: &mut [OneShotTimer<ErasedTimer>; 1] = make_static!(timers);
-    esp_hal_embassy::init(&clocks, timers);
-
+    /*
     let wifi_res = esp_hal_wifimanager::init_wm(
         esp_hal_wifimanager::WmSettings::default(),
         init,
@@ -67,10 +102,11 @@ async fn main(spawner: Spawner) {
     .await;
 
     log::info!("wifi_res: {wifi_res:?}");
+    */
 
     loop {
         //rtc.rwdt.feed();
         log::info!("bump {}", esp_hal::time::current_time());
-        Timer::after_millis(10).await;
+        Timer::after_millis(1000).await;
     }
 }
