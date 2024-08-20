@@ -11,15 +11,15 @@ use bleps::{
     gatt,
 };
 use embassy_executor::Spawner;
-use embassy_net::{Config, Stack, StackResources};
+use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::{BT, WIFI};
 use esp_wifi::{
     ble::controller::asynch::BleConnector,
     wifi::{
-        ClientConfiguration, Configuration, WifiController, WifiDevice, WifiEvent, WifiStaDevice,
-        WifiState,
+        ClientConfiguration, Configuration, WifiApDevice, WifiController, WifiDevice, WifiEvent,
+        WifiStaDevice, WifiState,
     },
     EspWifiInitialization,
 };
@@ -28,6 +28,7 @@ use nvs::NvsFlash;
 use structs::{Result, WifiSigData};
 
 pub use structs::{WmError, WmSettings};
+use tickv::TicKV;
 
 mod nvs;
 mod structs;
@@ -53,19 +54,59 @@ pub async fn init_wm(
     bt: BT,
     spawner: &Spawner,
 ) -> Result<()> {
+    let mut generated_name = String::<32>::new();
+    _ = core::fmt::write(
+        &mut generated_name,
+        format_args!("ESP-{:X}", get_efuse_mac()),
+    );
+
+    let ap_config = esp_wifi::wifi::AccessPointConfiguration {
+        ssid: generated_name.clone(),
+        auth_method: esp_wifi::wifi::AuthMethod::WPA2Personal,
+        password: "ESP1234567890".try_into().unwrap(),
+        ..Default::default()
+    };
+
+    let (ap_interface, sta_interface, mut controller) =
+        esp_wifi::wifi::new_ap_sta_with_config(&init, wifi, Default::default(), ap_config)
+            .map_err(|e| WmError::WifiError(e))?;
+
+    /*
     let (wifi_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
             .map_err(|e| WmError::WifiError(e))?;
+    */
 
-    let config = Config::dhcpv4(Default::default());
     let seed = settings.wifi_seed;
 
-    let stack = &*{
+    let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
+    let ap_config = Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(ap_ip, 24),
+        gateway: Some(ap_ip),
+        dns_servers: Default::default(),
+    });
+    let ap_stack = &*{
+        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
+            static_cell::StaticCell::new();
+        STATIC_CELL.uninit().write(Stack::new(
+            ap_interface,
+            ap_config,
+            {
+                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                    static_cell::StaticCell::new();
+                STATIC_CELL.uninit().write(StackResources::<3>::new())
+            },
+            seed,
+        ))
+    };
+
+    let sta_config = Config::dhcpv4(Default::default());
+    let sta_stack = &*{
         static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
             static_cell::StaticCell::new();
         STATIC_CELL.uninit().write(Stack::new(
-            wifi_interface,
-            config,
+            sta_interface,
+            sta_config,
             {
                 static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
                     static_cell::StaticCell::new();
@@ -105,10 +146,11 @@ pub async fn init_wm(
         }
     }
 
-    drop(nvs);
+    //drop(nvs);
 
     let wifi_reconnect_time = settings.wifi_reconnect_time;
     if ssid.len() > 0 && psk.len() > 0 {
+        // final connection
         let client_config = Configuration::Client(ClientConfiguration {
             ssid,
             password: psk,
@@ -122,18 +164,18 @@ pub async fn init_wm(
         let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
-            bluetooth_task(settings, &spawner, init, bt, &mut controller).await?;
+            bluetooth_task(settings, &spawner, init, bt, &nvs, &mut controller).await?;
         }
     } else {
-        bluetooth_task(settings, &spawner, init, bt, &mut controller).await?;
+        bluetooth_task(settings, &spawner, init, bt, &nvs, &mut controller).await?;
     }
 
     spawner
-        .spawn(connection(wifi_reconnect_time, controller, stack))
+        .spawn(connection(wifi_reconnect_time, controller, sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
     spawner
-        .spawn(net_task(stack))
+        .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
     Ok(())
@@ -179,17 +221,18 @@ async fn bluetooth_task(
     spawner: &Spawner,
     init: EspWifiInitialization,
     bt: BT,
+    nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
 ) -> Result<()> {
     // TODO: name should be passed as parameter outside the lib
-    let mut generated_name = String::<31>::new();
+    let mut generated_name = String::<32>::new();
     _ = core::fmt::write(
         &mut generated_name,
         format_args!("ESP-{:X}", get_efuse_mac()),
     );
 
     spawner
-        .spawn(bluetooth(init, bt, generated_name))
+        .spawn(bluetooth(init, bt, generated_name.clone()))
         .map_err(|_| WmError::BtTaskSpawnError)?;
 
     let mut last_scan = Instant::MIN;
@@ -210,16 +253,6 @@ async fn bluetooth_task(
             let wifi_connected = try_to_wifi_connect(controller, &settings).await;
             WIFI_CONN_RES_SIG.signal(wifi_connected);
             if wifi_connected {
-                let mut read_buf: [u8; 1024] = [0; 1024];
-                let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-                    NvsFlash::new(settings.flash_offset),
-                    &mut read_buf,
-                    settings.flash_size,
-                );
-
-                nvs.initialise(nvs::hash(tickv::MAIN_KEY))
-                    .map_err(|e| WmError::FlashError(e))?;
-
                 nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes())
                     .map_err(|e| WmError::FlashError(e))?;
 
@@ -232,8 +265,8 @@ async fn bluetooth_task(
 
         if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
             let mut scan_str = String::<256>::new();
-            let dsa = controller.scan_with_config::<10>(Default::default()).await;
-            if let Ok((dsa, count)) = dsa {
+            let scan_res = controller.scan_with_config::<10>(Default::default()).await;
+            if let Ok((dsa, count)) = scan_res {
                 for i in 0..count {
                     let d = &dsa[i];
                     _ = scan_str.push_str(&d.ssid);
@@ -254,7 +287,7 @@ async fn bluetooth_task(
 }
 
 #[embassy_executor::task]
-async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<31>) {
+async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
     static BLE_DATA_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
 
     let connector = BleConnector::new(&init, &mut bt);
@@ -412,7 +445,13 @@ async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevic
 }
 
 #[embassy_executor::task]
-async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+    stack.run().await
+}
+
+#[embassy_executor::task]
+async fn ap_task(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    // TODO: kill signal
     stack.run().await
 }
 
