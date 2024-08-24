@@ -62,8 +62,6 @@ pub async fn init_wm(
 
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
         ssid: generated_name.clone(),
-        auth_method: esp_wifi::wifi::AuthMethod::WPA2Personal,
-        password: "ESP1234567890".try_into().unwrap(),
         ..Default::default()
     };
 

@@ -13,7 +13,7 @@ esp-wifi = { version = "0.7.1", default-features = false, features = [ "wifi", "
 bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
 static_cell = { version = "2.1.0", features = ["nightly"] }
 log = "0.4.22"
-embassy-time = { version = "0.3.1", default-features = false }
+embassy-time = { version = "0.3.2", default-features = false }
 embassy-executor = { version = "0.5.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false }
 embassy-sync = { version = "0.6.0", default-features = false }

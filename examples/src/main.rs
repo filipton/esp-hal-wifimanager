@@ -52,38 +52,13 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(&clocks, timers);
 
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-
-    unsafe {
-        let timg0 = peripherals.TIMG0.clone_unchecked();
-        let radio_clk = peripherals.RADIO_CLK.clone_unchecked();
-
-        let timer = PeriodicTimer::new(
-            esp_hal::timer::timg::TimerGroup::new(timg0, &clocks, None)
-                .timer0
-                .into(),
-        );
-        let init = esp_wifi::initialize(
-            esp_wifi::EspWifiInitFor::WifiBle,
-            timer,
-            rng.clone(),
-            radio_clk,
-            &clocks,
-        )
-        .unwrap();
-
-        Timer::after_millis(5000).await;
-
-        drop(init);
-    }
-
-
     let timer = PeriodicTimer::new(
         esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks, None)
             .timer0
             .into(),
     );
     let init = esp_wifi::initialize(
-        esp_wifi::EspWifiInitFor::Wifi,
+        esp_wifi::EspWifiInitFor::WifiBle,
         timer,
         rng.clone(),
         peripherals.RADIO_CLK,
