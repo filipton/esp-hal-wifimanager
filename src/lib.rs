@@ -24,6 +24,7 @@ use esp_wifi::{
 };
 use heapless::{String, Vec};
 use nvs::NvsFlash;
+use static_cell::make_static;
 use structs::{Result, WifiSigData};
 
 pub use structs::{WmError, WmSettings};
@@ -161,10 +162,28 @@ pub async fn init_wm(
         let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
-            bluetooth_task(settings, &spawner, init, bt, &nvs, &mut controller).await?;
+            bluetooth_task(
+                settings,
+                &spawner,
+                init,
+                bt,
+                &nvs,
+                &mut controller,
+                ap_stack,
+            )
+            .await?;
         }
     } else {
-        bluetooth_task(settings, &spawner, init, bt, &nvs, &mut controller).await?;
+        bluetooth_task(
+            settings,
+            &spawner,
+            init,
+            bt,
+            &nvs,
+            &mut controller,
+            ap_stack,
+        )
+        .await?;
     }
 
     spawner
@@ -220,6 +239,7 @@ async fn bluetooth_task(
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
+    ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
 ) -> Result<()> {
     // TODO: name should be passed as parameter outside the lib
     let mut generated_name = String::<32>::new();
@@ -231,6 +251,9 @@ async fn bluetooth_task(
     spawner
         .spawn(bluetooth(init, bt, generated_name.clone()))
         .map_err(|_| WmError::BtTaskSpawnError)?;
+
+    let ap_close_signal = &*make_static!(Signal::<CriticalSectionRawMutex, ()>::new());
+    spawner.spawn(ap_task(ap_stack, &ap_close_signal)).unwrap();
 
     let mut last_scan = Instant::MIN;
     loop {
@@ -447,9 +470,11 @@ async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
 }
 
 #[embassy_executor::task]
-async fn ap_task(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
-    // TODO: kill signal
-    stack.run().await
+async fn ap_task(
+    stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
+) {
+    embassy_futures::select::select(stack.run(), close_signal.wait()).await;
 }
 
 /// This function returns value with maximum of signed integer

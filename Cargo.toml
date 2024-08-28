@@ -20,6 +20,8 @@ embassy-sync = { version = "0.6.0", default-features = false }
 esp-storage = { version = "0.3.0", features = [] }
 embedded-storage = "0.3.1"
 tickv = "1.0.0"
+esp-hal-dhcp-server = { path = "../esp-hal-dhcp-server" }
+embassy-futures = "0.1.1"
 
 [features]
 #default = []
