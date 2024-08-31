@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(type_alias_impl_trait)]
 
 use bleps::{
     ad_structure::{
