@@ -612,7 +612,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-dhcp-server"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df286ed02f357c1182b931692cb3df61f7e1be751a78ec375f6dcbee8b0829ce"
 dependencies = [
  "edge-dhcp",
  "embassy-futures",

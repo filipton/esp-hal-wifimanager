@@ -14,6 +14,7 @@ use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::{BT, WIFI};
+use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
     ble::controller::asynch::BleConnector,
     wifi::{
@@ -232,6 +233,25 @@ async fn try_to_wifi_connect(
     }
 }
 
+#[embassy_executor::task]
+async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    let mut leaser =
+        esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(Ipv4Addr::new(192, 168, 4, 100));
+
+    esp_hal_dhcp_server::run_dhcp_server(
+        ap_stack,
+        esp_hal_dhcp_server::structs::DhcpServerConfig {
+            ip: Ipv4Addr::new(192, 168, 4, 1),
+            lease_time: Duration::from_secs(3600),
+            gateways: &[],
+            subnet: None,
+            dns: &[],
+        },
+        &mut leaser,
+    )
+    .await;
+}
+
 async fn bluetooth_task(
     settings: WmSettings,
     spawner: &Spawner,
@@ -248,6 +268,7 @@ async fn bluetooth_task(
         format_args!("ESP-{:X}", get_efuse_mac()),
     );
 
+    spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
     spawner
         .spawn(bluetooth(init, bt, generated_name.clone()))
         .map_err(|_| WmError::BtTaskSpawnError)?;
@@ -278,6 +299,9 @@ async fn bluetooth_task(
 
                 nvs.append_key(nvs::hash(b"WIFI_PSK"), conn_info.psk.as_bytes())
                     .map_err(|e| WmError::FlashError(e))?;
+
+                esp_hal_dhcp_server::dhcp_close();
+                ap_close_signal.signal(());
 
                 return Ok(());
             }
@@ -344,6 +368,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
         let mut wf = |_offset: usize, data: &[u8]| {
             let mut tmp = [0; 128];
             tmp[..data.len()].copy_from_slice(data);
+            log::info!("BT: {}", core::str::from_utf8(data).unwrap());
             BLE_DATA_SIG.signal((tmp, data.len()));
         };
 
