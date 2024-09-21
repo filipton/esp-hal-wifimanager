@@ -1,4 +1,4 @@
-use heapless::String;
+use serde::Deserialize;
 
 #[derive(Debug)]
 pub enum WmError {
@@ -24,10 +24,11 @@ pub struct WmSettings {
     pub wifi_seed: u64,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct WifiSigData {
-    pub ssid: String<32>,
-    pub psk: String<64>,
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct AutoSetupSettings {
+    pub ssid: alloc::string::String,
+    pub psk: alloc::string::String,
+    pub data: serde_json::Value,
 }
 
 impl WmSettings {

@@ -1,5 +1,7 @@
 #![no_std]
 
+use core::str::FromStr;
+
 use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -26,7 +28,7 @@ use esp_wifi::{
 use heapless::{String, Vec};
 use nvs::NvsFlash;
 use static_cell::make_static;
-use structs::{Result, WifiSigData};
+use structs::{AutoSetupSettings, Result, WifiSigData};
 extern crate alloc;
 
 pub use structs::{WmError, WmSettings};
@@ -44,7 +46,7 @@ mod structs;
 
 static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());
 /// This is used to tell main task to connect to wifi
-static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, WifiSigData> = Signal::new();
+static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, alloc::vec::Vec<u8>> = Signal::new();
 /// This is used to tell ble task about conn result
 static WIFI_CONN_RES_SIG: Signal<CriticalSectionRawMutex, bool> = Signal::new();
 
@@ -130,30 +132,21 @@ pub async fn init_wm(
     nvs.initialise(nvs::hash(tickv::MAIN_KEY))
         .map_err(|e| WmError::FlashError(e))?;
 
-    let mut ssid_buf = [0; 32];
-    let mut ssid = String::<32>::new();
-    if nvs.get_key(nvs::hash(b"WIFI_SSID"), &mut ssid_buf).is_ok() {
-        if let Ok(s) = core::str::from_utf8(&ssid_buf) {
-            _ = ssid.push_str(s);
-        }
-    }
-
-    let mut psk_buf = [0; 64];
-    let mut psk = String::<64>::new();
-    if nvs.get_key(nvs::hash(b"WIFI_PSK"), &mut psk_buf).is_ok() {
-        if let Ok(s) = core::str::from_utf8(&psk_buf) {
-            _ = psk.push_str(s);
-        }
-    }
+    let mut wifi_setup = alloc::vec::Vec::<u8>::new();
+    let wifi_setup: Option<AutoSetupSettings> =
+        match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
+            Ok(_) => Some(serde_json::from_slice(&wifi_setup).unwrap()),
+            Err(_) => None,
+        };
 
     //drop(nvs);
 
     let wifi_reconnect_time = settings.wifi_reconnect_time;
-    if ssid.len() > 0 && psk.len() > 0 {
+    if let Some(wifi_setup) = wifi_setup {
         // final connection
         let client_config = Configuration::Client(ClientConfiguration {
-            ssid,
-            password: psk,
+            ssid: String::from_str(&wifi_setup.ssid).unwrap(),
+            password: String::from_str(&wifi_setup.psk).unwrap(),
             ..Default::default()
         });
 
@@ -280,12 +273,14 @@ async fn bluetooth_task(
     let mut last_scan = Instant::MIN;
     loop {
         if WIFI_CONN_INFO_SIG.signaled() {
-            let conn_info = WIFI_CONN_INFO_SIG.wait().await;
-            log::warn!("trying to connect to: {:?}", conn_info);
+            let setup_info_buf = WIFI_CONN_INFO_SIG.wait().await;
+            // TODO: error handling
+            let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf).unwrap();
 
+            log::warn!("trying to connect to: {:?}", setup_info);
             let client_config = Configuration::Client(ClientConfiguration {
-                ssid: conn_info.ssid.clone(),
-                password: conn_info.psk.clone(),
+                ssid: String::from_str(&setup_info.ssid).unwrap(),
+                password: String::from_str(&setup_info.psk).unwrap(),
                 ..Default::default()
             });
             controller
@@ -295,10 +290,7 @@ async fn bluetooth_task(
             let wifi_connected = try_to_wifi_connect(controller, &settings).await;
             WIFI_CONN_RES_SIG.signal(wifi_connected);
             if wifi_connected {
-                nvs.append_key(nvs::hash(b"WIFI_SSID"), conn_info.ssid.as_bytes())
-                    .map_err(|e| WmError::FlashError(e))?;
-
-                nvs.append_key(nvs::hash(b"WIFI_PSK"), conn_info.psk.as_bytes())
+                nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)
                     .map_err(|e| WmError::FlashError(e))?;
 
                 esp_hal_dhcp_server::dhcp_close();
@@ -385,12 +377,7 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
         let mut rng = bleps::no_rng::NoRng;
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
 
-        let mut wifi_sig_field = 0;
-        let mut wifi_sig_data = WifiSigData {
-            ssid: String::new(),
-            psk: String::new(),
-        };
-
+        let mut setup_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
         loop {
             match srv.do_work().await {
                 Ok(res) => {
@@ -408,27 +395,18 @@ async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
                 for i in 0..len {
                     let d = data[i];
                     if d == 0x00 {
-                        wifi_sig_field += 1;
-                        continue;
+                        WIFI_CONN_INFO_SIG.signal(setup_buf.clone());
+                        setup_buf.clear();
+
+                        let wifi_connected = WIFI_CONN_RES_SIG.wait().await;
+                        if wifi_connected {
+                            break 'outer;
+                        }
+
+                        break;
                     }
 
-                    if wifi_sig_field == 0 {
-                        _ = wifi_sig_data.ssid.push(d as char);
-                    } else if wifi_sig_field == 1 {
-                        _ = wifi_sig_data.psk.push(d as char);
-                    }
-                }
-
-                if wifi_sig_field == 2 {
-                    WIFI_CONN_INFO_SIG.signal(wifi_sig_data.clone());
-                    wifi_sig_field = 0;
-                    wifi_sig_data.ssid.clear();
-                    wifi_sig_data.psk.clear();
-
-                    let wifi_connected = WIFI_CONN_RES_SIG.wait().await;
-                    if wifi_connected {
-                        break 'outer;
-                    }
+                    setup_buf.push(d);
                 }
             }
 
