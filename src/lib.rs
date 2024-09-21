@@ -29,7 +29,7 @@ use esp_wifi::{
 use heapless::{String, Vec};
 use nvs::NvsFlash;
 use static_cell::make_static;
-use structs::{AutoSetupSettings, Result, WifiSigData};
+use structs::{AutoSetupSettings, Result};
 extern crate alloc;
 
 pub use structs::{WmError, WmSettings};
@@ -133,17 +133,29 @@ pub async fn init_wm(
     nvs.initialise(nvs::hash(tickv::MAIN_KEY))
         .map_err(|e| WmError::FlashError(e))?;
 
-    let mut wifi_setup = alloc::vec::Vec::<u8>::new();
+    let mut wifi_setup = [0; 1024];
     let wifi_setup: Option<AutoSetupSettings> =
         match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
-            Ok(_) => Some(serde_json::from_slice(&wifi_setup).unwrap()),
-            Err(_) => None,
+            Ok(_) => {
+                let end_pos = wifi_setup
+                    .iter()
+                    .position(|&x| x == 0x00)
+                    .unwrap_or(wifi_setup.len());
+
+                Some(serde_json::from_slice(&wifi_setup[..end_pos]).unwrap())
+            }
+            Err(e) => {
+                log::error!("read_nvs_err: {e:?}");
+                None
+            }
         };
 
     //drop(nvs);
 
     let wifi_reconnect_time = settings.wifi_reconnect_time;
     if let Some(wifi_setup) = wifi_setup {
+        log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
+
         // final connection
         let client_config = Configuration::Client(ClientConfiguration {
             ssid: String::from_str(&wifi_setup.ssid).unwrap(),
@@ -275,7 +287,6 @@ async fn bluetooth_task(
     loop {
         if WIFI_CONN_INFO_SIG.signaled() {
             let setup_info_buf = WIFI_CONN_INFO_SIG.wait().await;
-            // TODO: error handling
             let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf).unwrap();
 
             log::warn!("trying to connect to: {:?}", setup_info);
