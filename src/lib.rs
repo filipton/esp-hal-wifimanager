@@ -27,6 +27,7 @@ use heapless::{String, Vec};
 use nvs::NvsFlash;
 use static_cell::make_static;
 use structs::{Result, WifiSigData};
+extern crate alloc;
 
 pub use structs::{WmError, WmSettings};
 use tickv::TicKV;

@@ -2,6 +2,8 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+use core::mem::MaybeUninit;
+
 use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_backtrace as _;
@@ -13,6 +15,20 @@ use esp_hal::{
     system::SystemControl,
     timer::{timg::TimerGroup, ErasedTimer, OneShotTimer, PeriodicTimer},
 };
+
+// TODO: in next esp-hal version (0.21.X) global allocator will be used for wifi/ble.
+//       So this HEAP_SIZE will be bigger (for example 150*1024 - 200*1024)
+#[global_allocator]
+static ALLOCATOR: esp_alloc::EspHeap = esp_alloc::EspHeap::empty();
+
+fn init_heap() {
+    const HEAP_SIZE: usize = 50 * 1024;
+    static mut HEAP: MaybeUninit<[u8; HEAP_SIZE]> = MaybeUninit::uninit();
+
+    unsafe {
+        ALLOCATOR.init(HEAP.as_mut_ptr() as *mut u8, HEAP_SIZE);
+    }
+}
 
 // TODO: maybe i should make another crate for this make_static?
 /// This is macro from static_cell (static_cell::make_static!) but without weird stuff
@@ -34,6 +50,7 @@ async fn main(spawner: Spawner) {
             .freeze();
 
     let clocks = &*make_static!(clocks);
+    init_heap();
 
     /*
     let mut rtc = Rtc::new(peripherals.LPWR, None);
@@ -45,21 +62,14 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();
     log::set_max_level(log::LevelFilter::Info);
 
-    let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks, None);
-    let timer0 = OneShotTimer::new(timg1.timer0.into());
-    let timers = [timer0];
-    let timers: &mut [OneShotTimer<ErasedTimer>; 1] = make_static!(timers);
-    esp_hal_embassy::init(&clocks, timers);
+    let timg1 = TimerGroup::new(peripherals.TIMG1, &clocks);
+    esp_hal_embassy::init(&clocks, timg1.timer0);
 
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timer = PeriodicTimer::new(
-        esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks, None)
-            .timer0
-            .into(),
-    );
+    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks);
     let init = esp_wifi::initialize(
         esp_wifi::EspWifiInitFor::WifiBle,
-        timer,
+        timg0.timer0,
         rng.clone(),
         peripherals.RADIO_CLK,
         &clocks,
