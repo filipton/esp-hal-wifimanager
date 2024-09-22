@@ -3,55 +3,32 @@
 
 use core::str::FromStr;
 
-use bleps::{
-    ad_structure::{
-        create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
-    },
-    async_attribute_server::AttributeServer,
-    asynch::Ble,
-    attribute_server::WorkResult,
-    gatt,
-};
+use alloc::sync::Arc;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::{BT, WIFI};
 use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
-    ble::controller::asynch::BleConnector,
     wifi::{
         ClientConfiguration, Configuration, WifiApDevice, WifiController, WifiDevice, WifiEvent,
         WifiStaDevice, WifiState,
     },
     EspWifiInitialization,
 };
-use heapless::{String, Vec};
+use heapless::String;
 use nvs::NvsFlash;
-use static_cell::make_static;
-use structs::{AutoSetupSettings, Result};
+use structs::{AutoSetupSettings, Result, WmInnerSignals};
 extern crate alloc;
 
 pub use structs::{WmError, WmSettings};
 use tickv::TicKV;
 
+mod bluetooth;
 mod nvs;
 mod structs;
 
-// TODO: maybe add way to modify this using WmSettings struct
-// (just use cargo expand and copy resulting gatt_attributes)
-//
-// Hardcoded values
-// const BLE_SERVICE_UUID: &'static str = "f254a578-ef88-4372-b5f5-5ecf87e65884";
-// const BLE_CHATACTERISTIC_UUID: &'static str = "bcd7e573-b0b2-4775-83c0-acbf3aaf210c";
-
-static WIFI_SCAN_RES: Mutex<CriticalSectionRawMutex, Vec<u8, 256>> = Mutex::new(Vec::new());
-/// This is used to tell main task to connect to wifi
-static WIFI_CONN_INFO_SIG: Signal<CriticalSectionRawMutex, alloc::vec::Vec<u8>> = Signal::new();
-/// This is used to tell ble task about conn result
-static WIFI_CONN_RES_SIG: Signal<CriticalSectionRawMutex, bool> = Signal::new();
-
-// TODO: add errors and Result's
 pub async fn init_wm(
     settings: WmSettings,
     init: EspWifiInitialization,
@@ -129,21 +106,20 @@ pub async fn init_wm(
         .map_err(|e| WmError::FlashError(e))?;
 
     let mut wifi_setup = [0; 1024];
-    let wifi_setup: Option<AutoSetupSettings> =
-        match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
-            Ok(_) => {
-                let end_pos = wifi_setup
-                    .iter()
-                    .position(|&x| x == 0x00)
-                    .unwrap_or(wifi_setup.len());
+    let wifi_setup = match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
+        Ok(_) => {
+            let end_pos = wifi_setup
+                .iter()
+                .position(|&x| x == 0x00)
+                .unwrap_or(wifi_setup.len());
 
-                Some(serde_json::from_slice(&wifi_setup[..end_pos]).unwrap())
-            }
-            Err(e) => {
-                log::error!("read_nvs_err: {e:?}");
-                None
-            }
-        };
+            Some(serde_json::from_slice::<AutoSetupSettings>(&wifi_setup[..end_pos]).unwrap())
+        }
+        Err(e) => {
+            log::error!("read_nvs_err: {e:?}");
+            None
+        }
+    };
 
     //drop(nvs);
 
@@ -151,13 +127,11 @@ pub async fn init_wm(
     let data = if let Some(wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
 
-        // final connection
         let client_config = Configuration::Client(ClientConfiguration {
             ssid: String::from_str(&wifi_setup.ssid).unwrap(),
             password: String::from_str(&wifi_setup.psk).unwrap(),
             ..Default::default()
         });
-
         controller
             .set_configuration(&client_config)
             .map_err(|e| WmError::WifiError(e))?;
@@ -165,7 +139,7 @@ pub async fn init_wm(
         let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
-            bluetooth_task(
+            wifi_connection_worker(
                 settings,
                 &spawner,
                 init,
@@ -179,7 +153,7 @@ pub async fn init_wm(
             wifi_setup.data
         }
     } else {
-        bluetooth_task(
+        wifi_connection_worker(
             settings,
             &spawner,
             init,
@@ -256,7 +230,7 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
     .await;
 }
 
-async fn bluetooth_task(
+async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
     init: EspWifiInitialization,
@@ -265,20 +239,26 @@ async fn bluetooth_task(
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
 ) -> Result<Option<serde_json::Value>> {
-    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
+    static AP_CLOSE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+    let wm_signals = Arc::new(WmInnerSignals::new());
 
+    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
     spawner
-        .spawn(bluetooth(init, bt, generated_ssid))
+        .spawn(bluetooth::bluetooth_task(
+            init,
+            bt,
+            generated_ssid,
+            wm_signals.clone(),
+        ))
         .map_err(|_| WmError::BtTaskSpawnError)?;
 
-    let ap_close_signal = &*make_static!(Signal::<CriticalSectionRawMutex, ()>::new());
-    spawner.spawn(ap_task(ap_stack, &ap_close_signal)).unwrap();
+    spawner.spawn(ap_task(ap_stack, &AP_CLOSE_SIGNAL)).unwrap();
 
     let mut last_scan = Instant::MIN;
     loop {
-        if WIFI_CONN_INFO_SIG.signaled() {
-            let setup_info_buf = WIFI_CONN_INFO_SIG.wait().await;
+        if wm_signals.wifi_conn_info_sig.signaled() {
+            let setup_info_buf = wm_signals.wifi_conn_info_sig.wait().await;
             let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf).unwrap();
 
             log::warn!("trying to connect to: {:?}", setup_info);
@@ -292,14 +272,13 @@ async fn bluetooth_task(
                 .map_err(|e| WmError::WifiError(e))?;
 
             let wifi_connected = try_to_wifi_connect(controller, &settings).await;
-            WIFI_CONN_RES_SIG.signal(wifi_connected);
+            wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
                 nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)
                     .map_err(|e| WmError::FlashError(e))?;
 
                 esp_hal_dhcp_server::dhcp_close();
-                ap_close_signal.signal(());
-
+                AP_CLOSE_SIGNAL.signal(());
                 return Ok(setup_info.data);
             }
         }
@@ -317,105 +296,13 @@ async fn bluetooth_task(
                 }
             }
 
-            let mut wifis = WIFI_SCAN_RES.lock().await;
+            let mut wifis = wm_signals.wifi_scan_res.lock().await;
             wifis.clear();
             _ = wifis.extend_from_slice(&scan_str.as_bytes());
             last_scan = Instant::now();
         }
 
         Timer::after_millis(100).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn bluetooth(init: EspWifiInitialization, mut bt: BT, name: String<32>) {
-    static BLE_DATA_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
-
-    let connector = BleConnector::new(&init, &mut bt);
-    let mut ble = Ble::new(connector, esp_wifi::current_millis);
-    'outer: loop {
-        _ = ble.init().await;
-        _ = ble.cmd_set_le_advertising_parameters().await;
-        _ = ble
-            .cmd_set_le_advertising_data(
-                create_advertising_data(&[
-                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0xf254)]),
-                    AdStructure::CompleteLocalName(name.as_str()),
-                ])
-                .expect("create_advertising_data error"),
-            )
-            .await;
-
-        _ = ble.cmd_set_le_advertise_enable(true).await;
-
-        log::info!("started advertising");
-        let mut rf = |offset: usize, data: &mut [u8]| {
-            if let Ok(wifis) = WIFI_SCAN_RES.try_lock() {
-                let range = offset..wifis.len();
-                let range_len = range.len();
-
-                data[..range_len].copy_from_slice(&wifis[range]);
-                range_len
-            } else {
-                return 0;
-            }
-        };
-
-        let mut wf = |_offset: usize, data: &[u8]| {
-            let mut tmp = [0; 128];
-            tmp[..data.len()].copy_from_slice(data);
-            log::info!("BT: {}", core::str::from_utf8(data).unwrap());
-            BLE_DATA_SIG.signal((tmp, data.len()));
-        };
-
-        gatt!([service {
-            uuid: "f254a578-ef88-4372-b5f5-5ecf87e65884",
-            characteristics: [characteristic {
-                uuid: "bcd7e573-b0b2-4775-83c0-acbf3aaf210c",
-                read: rf,
-                write: wf,
-            }],
-        },]);
-
-        let mut rng = bleps::no_rng::NoRng;
-        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
-
-        let mut setup_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-        loop {
-            match srv.do_work().await {
-                Ok(res) => {
-                    if let WorkResult::GotDisconnected = res {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    log::error!("err: {e:?}");
-                }
-            }
-
-            if BLE_DATA_SIG.signaled() {
-                let (data, len) = BLE_DATA_SIG.wait().await;
-                for i in 0..len {
-                    let d = data[i];
-                    if d == 0x00 {
-                        WIFI_CONN_INFO_SIG.signal(setup_buf.clone());
-                        setup_buf.clear();
-
-                        let wifi_connected = WIFI_CONN_RES_SIG.wait().await;
-                        if wifi_connected {
-                            break 'outer;
-                        }
-
-                        break;
-                    }
-
-                    setup_buf.push(d);
-                }
-            }
-
-            Timer::after_millis(10).await;
-        }
     }
 }
 
@@ -483,6 +370,7 @@ async fn ap_task(
     close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
 ) {
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
+    log::warn!("ap_task exit");
 }
 
 pub fn get_efuse_mac() -> u64 {
