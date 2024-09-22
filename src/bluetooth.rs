@@ -25,7 +25,7 @@ use crate::structs::WmInnerSignals;
 
 #[embassy_executor::task]
 pub async fn bluetooth_task(
-    init: EspWifiInitialization,
+    init: Arc<EspWifiInitialization>,
     mut bt: BT,
     name: String<32>,
     signals: Arc<WmInnerSignals>,

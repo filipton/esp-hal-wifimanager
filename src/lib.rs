@@ -42,15 +42,17 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) -> Result<Option<serde_json::Value>> {
-    let init = esp_wifi::initialize(
-        esp_wifi::EspWifiInitFor::WifiBle,
-        timer,
-        rng,
-        radio_clocks,
-        &clocks,
-    )
-    .unwrap();
+) -> Result<(Arc<EspWifiInitialization>, Option<serde_json::Value>)> {
+    let init = Arc::new(
+        esp_wifi::initialize(
+            esp_wifi::EspWifiInitFor::WifiBle,
+            timer,
+            rng,
+            radio_clocks,
+            &clocks,
+        )
+        .unwrap(),
+    );
 
     let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
@@ -157,7 +159,7 @@ pub async fn init_wm(
             wifi_connection_worker(
                 settings,
                 &spawner,
-                init,
+                init.clone(),
                 bt,
                 &nvs,
                 &mut controller,
@@ -171,7 +173,7 @@ pub async fn init_wm(
         wifi_connection_worker(
             settings,
             &spawner,
-            init,
+            init.clone(),
             bt,
             &nvs,
             &mut controller,
@@ -202,42 +204,8 @@ pub async fn init_wm(
     spawner
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
-    Ok(data)
-}
 
-async fn try_to_wifi_connect(
-    controller: &mut WifiController<'static>,
-    settings: &WmSettings,
-) -> bool {
-    let start_time = embassy_time::Instant::now();
-
-    loop {
-        if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
-            log::warn!("Connect timeout!");
-            return false;
-        }
-
-        match with_timeout(
-            Duration::from_millis(settings.wifi_conn_timeout),
-            controller.connect(),
-        )
-        .await
-        {
-            Ok(res) => match res {
-                Ok(_) => {
-                    log::info!("Wifi connected!");
-                    return true;
-                }
-                Err(e) => {
-                    log::info!("Failed to connect to wifi: {e:?}");
-                }
-            },
-            Err(_) => {
-                log::warn!("Connect timeout!");
-                return false;
-            }
-        }
-    }
+    Ok((init, data))
 }
 
 #[embassy_executor::task]
@@ -262,7 +230,7 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
-    init: EspWifiInitialization,
+    init: Arc<EspWifiInitialization>,
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
@@ -372,6 +340,54 @@ async fn connection(
     }
 }
 
+#[embassy_executor::task]
+async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+    stack.run().await
+}
+
+#[embassy_executor::task]
+async fn ap_task(
+    stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
+) {
+    embassy_futures::select::select(stack.run(), close_signal.wait()).await;
+}
+
+async fn try_to_wifi_connect(
+    controller: &mut WifiController<'static>,
+    settings: &WmSettings,
+) -> bool {
+    let start_time = embassy_time::Instant::now();
+
+    loop {
+        if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
+            log::warn!("Connect timeout!");
+            return false;
+        }
+
+        match with_timeout(
+            Duration::from_millis(settings.wifi_conn_timeout),
+            controller.connect(),
+        )
+        .await
+        {
+            Ok(res) => match res {
+                Ok(_) => {
+                    log::info!("Wifi connected!");
+                    return true;
+                }
+                Err(e) => {
+                    log::info!("Failed to connect to wifi: {e:?}");
+                }
+            },
+            Err(_) => {
+                log::warn!("Connect timeout!");
+                return false;
+            }
+        }
+    }
+}
+
 async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     while !stack.is_link_up() {
         Timer::after(Duration::from_millis(500)).await;
@@ -386,20 +402,6 @@ async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevic
 
         Timer::after(Duration::from_millis(500)).await;
     }
-}
-
-#[embassy_executor::task]
-async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    stack.run().await
-}
-
-#[embassy_executor::task]
-async fn ap_task(
-    stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
-    close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
-) {
-    embassy_futures::select::select(stack.run(), close_signal.wait()).await;
-    log::warn!("ap_task exit");
 }
 
 pub fn get_efuse_mac() -> u64 {
