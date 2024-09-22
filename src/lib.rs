@@ -8,14 +8,18 @@ use embassy_executor::Spawner;
 use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
-use esp_hal::peripherals::{BT, WIFI};
+use esp_hal::{
+    clock::Clocks,
+    peripherals::{BT, RADIO_CLK, WIFI},
+    rng::Rng,
+};
 use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
     wifi::{
         AuthMethod, ClientConfiguration, Configuration, Protocol, WifiApDevice, WifiController,
         WifiDevice, WifiEvent, WifiStaDevice, WifiState,
     },
-    EspWifiInitialization,
+    EspWifiInitialization, EspWifiTimerSource,
 };
 use heapless::String;
 use nvs::NvsFlash;
@@ -31,11 +35,23 @@ mod structs;
 
 pub async fn init_wm(
     settings: WmSettings,
-    init: EspWifiInitialization,
+    timer: impl EspWifiTimerSource,
+    rng: Rng,
+    radio_clocks: RADIO_CLK,
+    clocks: &Clocks<'_>,
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
 ) -> Result<Option<serde_json::Value>> {
+    let init = esp_wifi::initialize(
+        esp_wifi::EspWifiInitFor::WifiBle,
+        timer,
+        rng,
+        radio_clocks,
+        &clocks,
+    )
+    .unwrap();
+
     let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
         ssid: generated_ssid,
@@ -51,8 +67,6 @@ pub async fn init_wm(
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
             .map_err(|e| WmError::WifiError(e))?;
     */
-
-    let seed = settings.wifi_seed;
 
     let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
     let ap_config = Config::ipv4_static(StaticConfigV4 {
@@ -72,7 +86,7 @@ pub async fn init_wm(
                     static_cell::StaticCell::new();
                 STATIC_CELL.uninit().write(StackResources::<3>::new())
             },
-            seed,
+            settings.wifi_seed,
         ))
     };
 
@@ -88,7 +102,7 @@ pub async fn init_wm(
                     static_cell::StaticCell::new();
                 STATIC_CELL.uninit().write(StackResources::<3>::new())
             },
-            seed,
+            settings.wifi_seed,
         ))
     };
 

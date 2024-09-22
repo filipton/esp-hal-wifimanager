@@ -66,15 +66,6 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(&clocks, timg1.timer0);
 
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks);
-    let init = esp_wifi::initialize(
-        esp_wifi::EspWifiInitFor::WifiBle,
-        timg0.timer0,
-        rng.clone(),
-        peripherals.RADIO_CLK,
-        &clocks,
-    )
-    .unwrap();
 
     let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
     wm_settings.ssid_generator = |efuse| {
@@ -83,9 +74,13 @@ async fn main(spawner: Spawner) {
         generated_name
     };
 
+    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0, &clocks);
     let wifi_res = esp_hal_wifimanager::init_wm(
         wm_settings,
-        init,
+        timg0.timer0,
+        rng.clone(),
+        peripherals.RADIO_CLK,
+        &clocks,
         peripherals.WIFI,
         peripherals.BT,
         &spawner,
