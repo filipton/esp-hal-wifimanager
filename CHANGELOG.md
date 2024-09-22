@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Saving of wifi connection details to flash (it uses `TickV` as simple kvp store in `esp-storage`)
 - Additional data field in setup json
 - Ap SSID and BLE name from `WmSettings` (function that returns heapless string)
+- Disable AP after wifi connected successfully
 
 ### Changed
 
