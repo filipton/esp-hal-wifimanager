@@ -1,4 +1,4 @@
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -8,7 +8,7 @@ use bleps::{
     attribute_server::WorkResult,
     gatt,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
@@ -30,7 +30,8 @@ pub async fn bluetooth_task(
     name: String<32>,
     signals: Arc<WmInnerSignals>,
 ) {
-    static BLE_DATA_SIG: Signal<CriticalSectionRawMutex, ([u8; 128], usize)> = Signal::new();
+    let ble_data = Arc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
+    let ble_end_signal = Arc::new(Signal::<CriticalSectionRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
     let mut ble = Ble::new(connector, esp_wifi::current_millis);
@@ -66,8 +67,17 @@ pub async fn bluetooth_task(
         let mut wf = |_offset: usize, data: &[u8]| {
             let mut tmp = [0; 128];
             tmp[..data.len()].copy_from_slice(data);
-            log::info!("BT: {}", core::str::from_utf8(data).unwrap());
-            BLE_DATA_SIG.signal((tmp, data.len()));
+
+            if let Ok(mut guard) = ble_data.try_lock() {
+                for &d in data {
+                    if d == 0x00 {
+                        ble_end_signal.signal(());
+                        break;
+                    }
+
+                    guard.push(d);
+                }
+            }
         };
 
         gatt!([service {
@@ -77,12 +87,10 @@ pub async fn bluetooth_task(
                 read: rf,
                 write: wf,
             }],
-        },]);
+        }]);
 
         let mut rng = bleps::no_rng::NoRng;
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
-
-        let mut setup_buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
         loop {
             match srv.do_work().await {
                 Ok(res) => {
@@ -95,22 +103,14 @@ pub async fn bluetooth_task(
                 }
             }
 
-            if BLE_DATA_SIG.signaled() {
-                let (data, len) = BLE_DATA_SIG.wait().await;
-                for i in 0..len {
-                    let d = data[i];
-                    if d == 0x00 {
-                        signals.wifi_conn_info_sig.signal(setup_buf.clone());
-                        setup_buf.clear();
+            if ble_end_signal.signaled() {
+                let mut guard = ble_data.lock().await;
+                signals.wifi_conn_info_sig.signal(guard.to_vec());
+                guard.clear();
 
-                        let wifi_connected = signals.wifi_conn_res_sig.wait().await;
-                        if wifi_connected {
-                            return;
-                        }
-                        break;
-                    }
-
-                    setup_buf.push(d);
+                let wifi_connected = signals.wifi_conn_res_sig.wait().await;
+                if wifi_connected {
+                    return;
                 }
             }
 
