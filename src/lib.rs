@@ -1,8 +1,7 @@
 #![no_std]
 
-use core::str::FromStr;
-
 use alloc::sync::Arc;
+use core::{ops::DerefMut, str::FromStr};
 use embassy_executor::Spawner;
 use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
@@ -131,10 +130,7 @@ pub async fn init_wm(
 
             Some(serde_json::from_slice::<AutoSetupSettings>(&wifi_setup[..end_pos]).unwrap())
         }
-        Err(e) => {
-            log::error!("read_nvs_err: {e:?}");
-            None
-        }
+        Err(_) => None,
     };
 
     //drop(nvs);
@@ -280,21 +276,21 @@ async fn wifi_connection_worker(
         }
 
         if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
-            let mut scan_str = String::<256>::new();
             let scan_res = controller.scan_with_config::<10>(Default::default()).await;
-            if let Ok((dsa, count)) = scan_res {
-                for i in 0..count {
-                    let d = &dsa[i];
-                    _ = scan_str.push_str(&d.ssid);
-                    _ = scan_str.push_str(": ");
-                    _ = core::fmt::write(&mut scan_str, format_args!("{}", d.signal_strength));
-                    _ = scan_str.push('\n');
-                }
-            }
 
             let mut wifis = wm_signals.wifi_scan_res.lock().await;
             wifis.clear();
-            _ = wifis.extend_from_slice(&scan_str.as_bytes());
+            if let Ok((dsa, count)) = scan_res {
+                for i in 0..count {
+                    let d = &dsa[i];
+
+                    _ = core::fmt::write(
+                        wifis.deref_mut(),
+                        format_args!("{}: {}\n", d.ssid, d.signal_strength),
+                    );
+                }
+            }
+
             last_scan = Instant::now();
         }
 

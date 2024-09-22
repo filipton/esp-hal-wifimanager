@@ -58,7 +58,7 @@ impl WmSettings {
 }
 
 pub struct WmInnerSignals {
-    pub wifi_scan_res: Mutex<CriticalSectionRawMutex, alloc::vec::Vec<u8>>,
+    pub wifi_scan_res: Mutex<CriticalSectionRawMutex, alloc::string::String>,
 
     /// This is used to tell main task to connect to wifi
     pub wifi_conn_info_sig: Signal<CriticalSectionRawMutex, alloc::vec::Vec<u8>>,
@@ -70,7 +70,7 @@ pub struct WmInnerSignals {
 impl WmInnerSignals {
     pub fn new() -> Self {
         Self {
-            wifi_scan_res: Mutex::new(alloc::vec::Vec::new()),
+            wifi_scan_res: Mutex::new(alloc::string::String::new()),
             wifi_conn_info_sig: Signal::new(),
             wifi_conn_res_sig: Signal::new(),
         }
