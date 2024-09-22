@@ -252,8 +252,6 @@ async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
             match socket.read(&mut buf).await {
                 Ok(0) => {
                     log::warn!("socket.read EOF");
-                    _ = socket.close();
-                    _ = socket.abort();
                     break;
                 }
                 Ok(n) => {
@@ -264,8 +262,6 @@ async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
                         Ok(res) => {
                             if res.is_partial() {
                                 log::error!("request is partial");
-                                _ = socket.close();
-                                _ = socket.abort();
                                 break;
                             }
 
@@ -273,8 +269,6 @@ async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
                         }
                         Err(e) => {
                             log::error!("request.parse error: {e:?}");
-                            _ = socket.close();
-                            _ = socket.abort();
                             break;
                         }
                     };
@@ -299,22 +293,37 @@ async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
                             }
 
                             _ = socket.flush().await;
-                            _ = socket.close();
-                            _ = socket.abort();
                         }
                         _ => {
                             log::warn!("NOT FOUND: {req:?}");
+                            let res = socket
+                                .write_all(&utils::construct_http_resp(
+                                    404,
+                                    "Not Found",
+                                    &[Header {
+                                        name: "Content-Length",
+                                        value: b"0",
+                                    }],
+                                    &[],
+                                ))
+                                .await;
+
+                            if let Err(e) = res {
+                                log::error!("socket.write_all err: {e:?}");
+                                break;
+                            }
                         }
                     }
                 }
                 Err(e) => {
                     log::error!("socket.read error: {e:?}");
-                    _ = socket.close();
-                    _ = socket.abort();
                     break;
                 }
             }
         }
+
+        _ = socket.close();
+        _ = socket.abort();
     }
 }
 
