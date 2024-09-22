@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(type_alias_impl_trait)]
 
 use alloc::sync::Arc;
 use core::{ops::DerefMut, str::FromStr};
