@@ -57,7 +57,8 @@ pub async fn bluetooth_task(
                 let range = offset..wifis.len();
                 let range_len = range.len();
 
-                data[..range_len].copy_from_slice(&wifis[range]);
+                let scan_str = &wifis.as_bytes()[range];
+                data[..range_len].copy_from_slice(scan_str);
                 range_len
             } else {
                 return 0;
@@ -105,6 +106,10 @@ pub async fn bluetooth_task(
 
             if ble_end_signal.signaled() {
                 let mut guard = ble_data.lock().await;
+                if guard.len() == 0 {
+                    continue;
+                }
+
                 signals.wifi_conn_info_sig.signal(guard.to_vec());
                 guard.clear();
 
