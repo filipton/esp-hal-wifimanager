@@ -57,7 +57,7 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) -> Result<()> {
+) -> Result<Option<serde_json::Value>> {
     let mut generated_name = String::<32>::new();
     _ = core::fmt::write(
         &mut generated_name,
@@ -152,7 +152,7 @@ pub async fn init_wm(
     //drop(nvs);
 
     let wifi_reconnect_time = settings.wifi_reconnect_time;
-    if let Some(wifi_setup) = wifi_setup {
+    let data = if let Some(wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
 
         // final connection
@@ -178,7 +178,9 @@ pub async fn init_wm(
                 &mut controller,
                 ap_stack,
             )
-            .await?;
+            .await?
+        } else {
+            wifi_setup.data
         }
     } else {
         bluetooth_task(
@@ -190,8 +192,8 @@ pub async fn init_wm(
             &mut controller,
             ap_stack,
         )
-        .await?;
-    }
+        .await?
+    };
 
     spawner
         .spawn(connection(wifi_reconnect_time, controller, sta_stack))
@@ -201,7 +203,7 @@ pub async fn init_wm(
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
-    Ok(())
+    Ok(data)
 }
 
 async fn try_to_wifi_connect(
@@ -266,7 +268,7 @@ async fn bluetooth_task(
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
-) -> Result<()> {
+) -> Result<Option<serde_json::Value>> {
     // TODO: name should be passed as parameter outside the lib
     let mut generated_name = String::<32>::new();
     _ = core::fmt::write(
@@ -307,7 +309,7 @@ async fn bluetooth_task(
                 esp_hal_dhcp_server::dhcp_close();
                 ap_close_signal.signal(());
 
-                return Ok(());
+                return Ok(setup_info.data);
             }
         }
 
