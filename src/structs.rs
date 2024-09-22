@@ -28,7 +28,7 @@ pub struct WmSettings {
 pub(crate) struct AutoSetupSettings {
     pub ssid: alloc::string::String,
     pub psk: alloc::string::String,
-    pub data: serde_json::Value,
+    pub data: Option<serde_json::Value>,
 }
 
 impl WmSettings {
