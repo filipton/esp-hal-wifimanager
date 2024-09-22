@@ -76,8 +76,15 @@ async fn main(spawner: Spawner) {
     )
     .unwrap();
 
+    let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
+    wm_settings.ssid_generator = |efuse| {
+        let mut generated_name = heapless::String::<32>::new();
+        _ = core::fmt::write(&mut generated_name, format_args!("TEST-{:X}", efuse));
+        generated_name
+    };
+
     let wifi_res = esp_hal_wifimanager::init_wm(
-        esp_hal_wifimanager::WmSettings::default(),
+        wm_settings,
         init,
         peripherals.WIFI,
         peripherals.BT,

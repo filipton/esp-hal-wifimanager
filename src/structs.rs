@@ -16,6 +16,8 @@ pub type Result<T> = core::result::Result<T, WmError>;
 
 #[derive(Clone, Debug)]
 pub struct WmSettings {
+    pub ssid_generator: fn(u64) -> heapless::String<32>,
+
     pub flash_size: usize,
     pub flash_offset: usize,
     pub wifi_conn_timeout: u64,
@@ -37,6 +39,13 @@ impl WmSettings {
     /// Checked on esp32s3 and esp32c3
     pub fn default() -> Self {
         Self {
+            ssid_generator: |efuse| {
+                let mut generated_name = heapless::String::<32>::new();
+                _ = core::fmt::write(&mut generated_name, format_args!("ESP-{:X}", efuse));
+
+                generated_name
+            },
+
             flash_offset: 0x9000,
             flash_size: 0x6000,
             wifi_seed: 69420,

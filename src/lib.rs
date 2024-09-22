@@ -58,14 +58,9 @@ pub async fn init_wm(
     bt: BT,
     spawner: &Spawner,
 ) -> Result<Option<serde_json::Value>> {
-    let mut generated_name = String::<32>::new();
-    _ = core::fmt::write(
-        &mut generated_name,
-        format_args!("ESP-{:X}", get_efuse_mac()),
-    );
-
+    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
-        ssid: generated_name.clone(),
+        ssid: generated_ssid,
         ..Default::default()
     };
 
@@ -269,16 +264,11 @@ async fn bluetooth_task(
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
 ) -> Result<Option<serde_json::Value>> {
-    // TODO: name should be passed as parameter outside the lib
-    let mut generated_name = String::<32>::new();
-    _ = core::fmt::write(
-        &mut generated_name,
-        format_args!("ESP-{:X}", get_efuse_mac()),
-    );
+    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
 
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
     spawner
-        .spawn(bluetooth(init, bt, generated_name.clone()))
+        .spawn(bluetooth(init, bt, generated_ssid))
         .map_err(|_| WmError::BtTaskSpawnError)?;
 
     let ap_close_signal = &*make_static!(Signal::<CriticalSectionRawMutex, ()>::new());
@@ -494,15 +484,18 @@ async fn ap_task(
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
 }
 
+pub fn get_efuse_mac() -> u64 {
+    esp_hal::efuse::Efuse::get_mac_address()
+        .iter()
+        .fold(0u64, |acc, &x| (acc << 8) + x as u64)
+}
+
 /// This function returns value with maximum of signed integer
 /// (2147483647) to easily store it in postgres db as integer
 ///
-/// NOTE: this isn't exact efuse mac, it is hashed efuse mac!
-pub fn get_efuse_mac() -> u32 {
-    let mut efuse = esp_hal::efuse::Efuse::get_mac_address()
-        .iter()
-        .fold(0u64, |acc, &x| (acc << 8) + x as u64);
-
+/// TODO: remove this
+pub fn get_efuse_u32() -> u32 {
+    let mut efuse = get_efuse_mac();
     efuse = (!efuse).wrapping_add(efuse << 18);
     efuse = efuse ^ (efuse >> 31);
     efuse = efuse.wrapping_mul(21);

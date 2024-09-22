@@ -1,10 +1,8 @@
 # esp-hal-wifimanager
 Easy to use Wifimanager for esp-hal (no-std).
 
-If it can't connect to wifi it spawns BLE server. (You can use chrome on android or windows to configure it).
-
-## Why not WIFI AP
-Currently esp-hal (esp-wifi) doesn't support AP with "dhcp server".
+If it can't connect to wifi it spawns BLE server (You can use chrome on android or windows to configure it)
+and open wifi accesspoint with DHCP server.
 
 ## Simple example
 Add this to your Cargo.toml (note also add `embassy`, its only for async):
