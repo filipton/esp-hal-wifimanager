@@ -12,8 +12,8 @@ use esp_hal::peripherals::{BT, WIFI};
 use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
     wifi::{
-        ClientConfiguration, Configuration, WifiApDevice, WifiController, WifiDevice, WifiEvent,
-        WifiStaDevice, WifiState,
+        AuthMethod, ClientConfiguration, Configuration, Protocol, WifiApDevice, WifiController,
+        WifiDevice, WifiEvent, WifiStaDevice, WifiState,
     },
     EspWifiInitialization,
 };
@@ -60,6 +60,7 @@ pub async fn init_wm(
         gateway: Some(ap_ip),
         dns_servers: Default::default(),
     });
+
     let ap_stack = &*{
         static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
             static_cell::StaticCell::new();
@@ -165,6 +166,21 @@ pub async fn init_wm(
         .await?
     };
 
+    // hack to disable ap
+    // TODO: on esp-hal with version 0.21.X deinitalize stack
+    _ = controller.set_configuration(&Configuration::AccessPoint(
+        esp_wifi::wifi::AccessPointConfiguration {
+            ssid: heapless::String::new(),
+            ssid_hidden: true,
+            channel: 0,
+            secondary_channel: None,
+            protocols: Protocol::P802D11B.into(),
+            auth_method: AuthMethod::None,
+            password: heapless::String::new(),
+            max_connections: 0,
+        },
+    ));
+
     spawner
         .spawn(connection(wifi_reconnect_time, controller, sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
@@ -172,7 +188,6 @@ pub async fn init_wm(
     spawner
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
-
     Ok(data)
 }
 
