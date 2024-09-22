@@ -1,3 +1,4 @@
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -52,6 +53,26 @@ impl WmSettings {
             wifi_reconnect_time: 1000,
             wifi_conn_timeout: 15000,
             wifi_scan_interval: 15000,
+        }
+    }
+}
+
+pub struct WmInnerSignals {
+    pub wifi_scan_res: Mutex<CriticalSectionRawMutex, heapless::Vec<u8, 256>>,
+
+    /// This is used to tell main task to connect to wifi
+    pub wifi_conn_info_sig: Signal<CriticalSectionRawMutex, alloc::vec::Vec<u8>>,
+
+    /// This is used to tell ble task about conn result
+    pub wifi_conn_res_sig: Signal<CriticalSectionRawMutex, bool>,
+}
+
+impl WmInnerSignals {
+    pub fn new() -> Self {
+        Self {
+            wifi_scan_res: Mutex::new(heapless::Vec::new()),
+            wifi_conn_info_sig: Signal::new(),
+            wifi_conn_res_sig: Signal::new(),
         }
     }
 }
