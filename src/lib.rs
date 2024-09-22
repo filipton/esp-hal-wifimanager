@@ -4,9 +4,12 @@
 use alloc::sync::Arc;
 use core::{ops::DerefMut, str::FromStr};
 use embassy_executor::Spawner;
-use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
+use embassy_net::{
+    tcp::TcpSocket, Config, IpListenEndpoint, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
+};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{with_timeout, Duration, Instant, Timer};
+use embedded_io_async::Write;
 use esp_hal::{
     clock::Clocks,
     peripherals::{BT, RADIO_CLK, WIFI},
@@ -21,6 +24,7 @@ use esp_wifi::{
     EspWifiInitialization, EspWifiTimerSource,
 };
 use heapless::String;
+use httparse::Header;
 use nvs::NvsFlash;
 use structs::{AutoSetupSettings, Result, WmInnerSignals};
 extern crate alloc;
@@ -31,6 +35,7 @@ use tickv::TicKV;
 mod bluetooth;
 mod nvs;
 mod structs;
+mod utils;
 
 pub async fn init_wm(
     settings: WmSettings,
@@ -53,7 +58,7 @@ pub async fn init_wm(
         .unwrap(),
     );
 
-    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
+    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
         ssid: generated_ssid,
         ..Default::default()
@@ -149,7 +154,7 @@ pub async fn init_wm(
             .set_configuration(&client_config)
             .map_err(|e| WmError::WifiError(e))?;
 
-        let wifi_connected = try_to_wifi_connect(&mut controller, &settings).await;
+        let wifi_connected = utils::try_to_wifi_connect(&mut controller, &settings).await;
         if !wifi_connected {
             // this will "block" it has loop
             wifi_connection_worker(
@@ -223,6 +228,96 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
     .await;
 }
 
+#[embassy_executor::task]
+async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+    let mut rx_buffer = [0; 4096];
+    let mut tx_buffer = [0; 4096];
+
+    let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
+    socket.set_timeout(Some(embassy_time::Duration::from_secs(15)));
+
+    let mut buf = [0; 2048];
+    loop {
+        if let Err(e) = socket
+            .accept(IpListenEndpoint {
+                addr: None,
+                port: 80,
+            })
+            .await
+        {
+            log::error!("socket.accept error: {e:?}");
+        }
+
+        loop {
+            match socket.read(&mut buf).await {
+                Ok(0) => {
+                    log::warn!("socket.read EOF");
+                    _ = socket.close();
+                    _ = socket.abort();
+                    break;
+                }
+                Ok(n) => {
+                    let mut headers = [httparse::EMPTY_HEADER; 32];
+                    let mut req = httparse::Request::new(&mut headers);
+
+                    let body_offset = match req.parse(&buf[..n]) {
+                        Ok(res) => {
+                            if res.is_partial() {
+                                log::error!("request is partial");
+                                _ = socket.close();
+                                _ = socket.abort();
+                                break;
+                            }
+
+                            res.unwrap()
+                        }
+                        Err(e) => {
+                            log::error!("request.parse error: {e:?}");
+                            _ = socket.close();
+                            _ = socket.abort();
+                            break;
+                        }
+                    };
+
+                    let (path, method) = (req.path.unwrap_or("/"), req.method.unwrap_or("GET"));
+                    match (path, method) {
+                        ("/", "GET") => {
+                            let http_resp = utils::construct_http_resp(
+                                200,
+                                "OK",
+                                &[Header {
+                                    name: "Content-Length",
+                                    value: b"3",
+                                }],
+                                b"WOW",
+                            );
+
+                            let res = socket.write_all(&http_resp).await;
+                            if let Err(e) = res {
+                                log::error!("socket.write_all err: {e:?}");
+                                break;
+                            }
+
+                            _ = socket.flush().await;
+                            _ = socket.close();
+                            _ = socket.abort();
+                        }
+                        _ => {
+                            log::warn!("NOT FOUND: {req:?}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("socket.read error: {e:?}");
+                    _ = socket.close();
+                    _ = socket.abort();
+                    break;
+                }
+            }
+        }
+    }
+}
+
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
@@ -235,8 +330,9 @@ async fn wifi_connection_worker(
     static AP_CLOSE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
     let wm_signals = Arc::new(WmInnerSignals::new());
 
-    let generated_ssid = (settings.ssid_generator)(get_efuse_mac());
+    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
+    spawner.spawn(run_http_server(ap_stack)).unwrap();
     spawner
         .spawn(bluetooth::bluetooth_task(
             init,
@@ -264,7 +360,7 @@ async fn wifi_connection_worker(
                 .set_configuration(&client_config)
                 .map_err(|e| WmError::WifiError(e))?;
 
-            let wifi_connected = try_to_wifi_connect(controller, &settings).await;
+            let wifi_connected = utils::try_to_wifi_connect(controller, &settings).await;
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
                 nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)
@@ -314,7 +410,7 @@ async fn connection(
     loop {
         if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
             if first_conn {
-                wifi_wait_for_ip(stack).await;
+                utils::wifi_wait_for_ip(stack).await;
                 first_conn = false;
             }
 
@@ -326,7 +422,7 @@ async fn connection(
         match controller.connect().await {
             Ok(_) => {
                 log::info!("Wifi connected!");
-                wifi_wait_for_ip(stack).await;
+                utils::wifi_wait_for_ip(stack).await;
             }
             Err(e) => {
                 log::info!("Failed to connect to wifi: {e:?}");
@@ -347,78 +443,4 @@ async fn ap_task(
     close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
 ) {
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
-}
-
-async fn try_to_wifi_connect(
-    controller: &mut WifiController<'static>,
-    settings: &WmSettings,
-) -> bool {
-    let start_time = embassy_time::Instant::now();
-
-    loop {
-        if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
-            log::warn!("Connect timeout!");
-            return false;
-        }
-
-        match with_timeout(
-            Duration::from_millis(settings.wifi_conn_timeout),
-            controller.connect(),
-        )
-        .await
-        {
-            Ok(res) => match res {
-                Ok(_) => {
-                    log::info!("Wifi connected!");
-                    return true;
-                }
-                Err(e) => {
-                    log::info!("Failed to connect to wifi: {e:?}");
-                }
-            },
-            Err(_) => {
-                log::warn!("Connect timeout!");
-                return false;
-            }
-        }
-    }
-}
-
-async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    while !stack.is_link_up() {
-        Timer::after(Duration::from_millis(500)).await;
-    }
-
-    log::info!("Waiting to get IP address...");
-    loop {
-        if let Some(config) = stack.config_v4() {
-            log::info!("Got IP: {}", config.address);
-            break;
-        }
-
-        Timer::after(Duration::from_millis(500)).await;
-    }
-}
-
-pub fn get_efuse_mac() -> u64 {
-    esp_hal::efuse::Efuse::get_mac_address()
-        .iter()
-        .fold(0u64, |acc, &x| (acc << 8) + x as u64)
-}
-
-/// This function returns value with maximum of signed integer
-/// (2147483647) to easily store it in postgres db as integer
-///
-/// TODO: remove this
-pub fn get_efuse_u32() -> u32 {
-    let mut efuse = get_efuse_mac();
-    efuse = (!efuse).wrapping_add(efuse << 18);
-    efuse = efuse ^ (efuse >> 31);
-    efuse = efuse.wrapping_mul(21);
-    efuse = efuse ^ (efuse >> 11);
-    efuse = efuse.wrapping_add(efuse << 6);
-    efuse = efuse ^ (efuse >> 22);
-
-    let mac = efuse & 0x000000007FFFFFFF;
-    mac as u32
 }
