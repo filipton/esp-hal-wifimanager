@@ -92,6 +92,6 @@ async fn main(spawner: Spawner) {
     loop {
         //rtc.rwdt.feed();
         log::info!("bump {}", esp_hal::time::current_time());
-        Timer::after_millis(1000).await;
+        Timer::after_millis(15000).await;
     }
 }
