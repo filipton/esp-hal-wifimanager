@@ -88,6 +88,7 @@ pub fn get_efuse_mac() -> u64 {
 /// (2147483647) to easily store it in postgres db as integer
 ///
 /// TODO: remove this
+#[allow(dead_code)]
 pub fn get_efuse_u32() -> u32 {
     let mut efuse = get_efuse_mac();
     efuse = (!efuse).wrapping_add(efuse << 18);

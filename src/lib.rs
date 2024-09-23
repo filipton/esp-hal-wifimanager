@@ -7,7 +7,7 @@ use embassy_net::{
     tcp::TcpSocket, Config, IpListenEndpoint, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
 };
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
-use embassy_time::{with_timeout, Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Write;
 use esp_hal::{
     clock::Clocks,
@@ -26,10 +26,11 @@ use heapless::String;
 use httparse::Header;
 use nvs::NvsFlash;
 use structs::{AutoSetupSettings, Result, WmInnerSignals};
+use tickv::TicKV;
 extern crate alloc;
 
 pub use structs::{WmError, WmSettings};
-use tickv::TicKV;
+pub use utils::{get_efuse_mac, get_efuse_u32};
 
 mod bluetooth;
 mod nvs;
@@ -228,12 +229,15 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 }
 
 #[embassy_executor::task]
-async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+async fn run_http_server(
+    ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    signals: Arc<WmInnerSignals>,
+) {
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
 
     let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
-    socket.set_timeout(Some(embassy_time::Duration::from_secs(15)));
+    socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
 
     let mut buf = [0; 2048];
     loop {
@@ -293,6 +297,32 @@ async fn run_http_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 
                             _ = socket.flush().await;
                         }
+                        ("/setup", "POST") => {
+                            signals
+                                .wifi_conn_info_sig
+                                .signal(buf[body_offset..].to_vec());
+                            let wifi_connected = signals.wifi_conn_res_sig.wait().await;
+                            let resp = alloc::format!("{}", wifi_connected);
+                            let resp_len = alloc::format!("{}", resp.len());
+
+                            let http_resp = utils::construct_http_resp(
+                                200,
+                                "OK",
+                                &[Header {
+                                    name: "Content-Length",
+                                    value: resp_len.as_bytes(),
+                                }],
+                                resp.as_bytes(),
+                            );
+
+                            let res = socket.write_all(&http_resp).await;
+                            if let Err(e) = res {
+                                log::error!("socket.write_all err: {e:?}");
+                                break;
+                            }
+
+                            _ = socket.flush().await;
+                        }
                         _ => {
                             log::warn!("NOT FOUND: {req:?}");
                             let res = socket
@@ -340,7 +370,10 @@ async fn wifi_connection_worker(
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
-    spawner.spawn(run_http_server(ap_stack)).unwrap();
+    spawner
+        .spawn(run_http_server(ap_stack, wm_signals.clone()))
+        .unwrap();
+
     spawner
         .spawn(bluetooth::bluetooth_task(
             init,
