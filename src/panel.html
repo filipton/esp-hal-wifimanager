@@ -1,0 +1,50 @@
+<html>
+
+<head>
+    <style>
+        #panel {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #panel>input {
+            padding: 5px;
+            margin-bottom: 3px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Simple panel test:</h1>
+    <form id="panel">
+        <input id="ssid" type="text" placeholder="Enter SSID..." />
+        <input id="psk" type="password" placeholder="Enter PSK..." />
+        <br />
+
+        <input type="submit" value="Try To Connect" />
+    </form>
+
+    <script>
+        const panel = document.querySelector("#panel");
+        panel.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            let json = JSON.stringify({
+                ssid: document.querySelector("#ssid").value,
+                psk: document.querySelector("#psk").value
+            });
+
+            try {
+                let res = await fetch("/setup", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: json
+                });
+            } catch (e) {
+                alert(`Fetch err: ${e}`);
+            }
+        });
+    </script>
+</body>
+
+</html>
