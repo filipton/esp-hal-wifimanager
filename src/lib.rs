@@ -232,6 +232,7 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 async fn run_http_server(
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
     signals: Arc<WmInnerSignals>,
+    wifi_panel_str: &'static str,
 ) {
     let mut rx_buffer = [0; 4096];
     let mut tx_buffer = [0; 4096];
@@ -279,14 +280,21 @@ async fn run_http_server(
                     let (path, method) = (req.path.unwrap_or("/"), req.method.unwrap_or("GET"));
                     match (path, method) {
                         ("/", "GET") => {
+                            let resp_len = alloc::format!("{}", wifi_panel_str.len());
                             let http_resp = utils::construct_http_resp(
                                 200,
                                 "OK",
-                                &[Header {
-                                    name: "Content-Length",
-                                    value: b"3",
-                                }],
-                                b"WOW",
+                                &[
+                                    Header {
+                                        name: "Content-Type",
+                                        value: b"text/html",
+                                    },
+                                    Header {
+                                        name: "Content-Length",
+                                        value: resp_len.as_bytes(),
+                                    },
+                                ],
+                                wifi_panel_str.as_bytes(),
                             );
 
                             let res = socket.write_all(&http_resp).await;
@@ -371,7 +379,11 @@ async fn wifi_connection_worker(
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
     spawner
-        .spawn(run_http_server(ap_stack, wm_signals.clone()))
+        .spawn(run_http_server(
+            ap_stack,
+            wm_signals.clone(),
+            settings.wifi_panel,
+        ))
         .unwrap();
 
     spawner

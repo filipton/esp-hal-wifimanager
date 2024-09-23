@@ -18,6 +18,7 @@ pub type Result<T> = core::result::Result<T, WmError>;
 #[derive(Clone, Debug)]
 pub struct WmSettings {
     pub ssid_generator: fn(u64) -> heapless::String<32>,
+    pub wifi_panel: &'static str,
 
     pub flash_size: usize,
     pub flash_offset: usize,
@@ -46,6 +47,7 @@ impl WmSettings {
 
                 generated_name
             },
+            wifi_panel: include_str!("./panel.html"),
 
             flash_offset: 0x9000,
             flash_size: 0x6000,
