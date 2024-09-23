@@ -300,7 +300,7 @@ async fn run_http_server(
                         ("/setup", "POST") => {
                             signals
                                 .wifi_conn_info_sig
-                                .signal(buf[body_offset..].to_vec());
+                                .signal(buf[body_offset..n].to_vec());
                             let wifi_connected = signals.wifi_conn_res_sig.wait().await;
                             let resp = alloc::format!("{}", wifi_connected);
                             let resp_len = alloc::format!("{}", resp.len());
