@@ -16,21 +16,12 @@ esp-hal-embassy = { version = "0.2.0", features = ["integrated-timers", "esp32s3
 Simple example (to see full example check `./examples` dir):
 ```rust
 // ...
-
-let init = esp_wifi::initialize(
-    esp_wifi::EspWifiInitFor::WifiBle,
-    timer,
-    esp_hal::rng::Rng::new(peripherals.RNG),
+let wifi_res = esp_hal_wifimanager::init_wm(
+    wm_settings,
+    timg0.timer0,
+    rng.clone(),
     peripherals.RADIO_CLK,
     &clocks,
-)
-.unwrap();
-
-// ...
-
-let wifi_res = esp_hal_wifimanager::init_wm(
-    esp_hal_wifimanager::WmSettings::default(),
-    init,
     peripherals.WIFI,
     peripherals.BT,
     &spawner,
