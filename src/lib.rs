@@ -1,6 +1,6 @@
 #![no_std]
 
-use alloc::sync::Arc;
+use alloc::rc::Rc;
 use core::{ops::DerefMut, str::FromStr};
 use embassy_executor::Spawner;
 use embassy_net::{
@@ -46,8 +46,8 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) -> Result<(Arc<EspWifiInitialization>, Option<serde_json::Value>)> {
-    let init = Arc::new(
+) -> Result<(Rc<EspWifiInitialization>, Option<serde_json::Value>)> {
+    let init = Rc::new(
         esp_wifi::initialize(
             esp_wifi::EspWifiInitFor::WifiBle,
             timer,
@@ -231,7 +231,7 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 #[embassy_executor::task]
 async fn run_http_server(
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
-    signals: Arc<WmInnerSignals>,
+    signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
 ) {
     let mut rx_buffer = [0; 4096];
@@ -367,14 +367,14 @@ async fn run_http_server(
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
-    init: Arc<EspWifiInitialization>,
+    init: Rc<EspWifiInitialization>,
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
 ) -> Result<Option<serde_json::Value>> {
     static AP_CLOSE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-    let wm_signals = Arc::new(WmInnerSignals::new());
+    let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     spawner.spawn(run_dhcp_server(ap_stack)).unwrap();

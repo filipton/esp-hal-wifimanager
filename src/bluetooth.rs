@@ -1,4 +1,4 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{rc::Rc, vec::Vec};
 use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
@@ -25,13 +25,13 @@ use crate::structs::WmInnerSignals;
 
 #[embassy_executor::task]
 pub async fn bluetooth_task(
-    init: Arc<EspWifiInitialization>,
+    init: Rc<EspWifiInitialization>,
     mut bt: BT,
     name: String<32>,
-    signals: Arc<WmInnerSignals>,
+    signals: Rc<WmInnerSignals>,
 ) {
-    let ble_data = Arc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
-    let ble_end_signal = Arc::new(Signal::<CriticalSectionRawMutex, ()>::new());
+    let ble_data = Rc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
+    let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
     let mut ble = Ble::new(connector, esp_wifi::current_millis);
