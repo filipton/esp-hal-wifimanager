@@ -46,7 +46,11 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) -> Result<(Rc<EspWifiInitialization>, Option<serde_json::Value>)> {
+) -> Result<(
+    Rc<EspWifiInitialization>,
+    &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    Option<serde_json::Value>,
+)> {
     let init = Rc::new(
         esp_wifi::initialize(
             esp_wifi::EspWifiInitFor::WifiBle,
@@ -206,7 +210,7 @@ pub async fn init_wm(
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
-    Ok((init, data))
+    Ok((init, sta_stack, data))
 }
 
 #[embassy_executor::task]

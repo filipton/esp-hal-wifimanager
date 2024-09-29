@@ -29,6 +29,6 @@ embedded-io-async = "0.6.1"
 
 [features]
 #default = []
-default = ["esp32c3"]
+default = ["esp32s3"]
 esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-storage/esp32s3"]
 esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3"]
