@@ -210,6 +210,21 @@ pub async fn init_wm(
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
+    loop {
+        if sta_stack.is_link_up() {
+            break;
+        }
+        Timer::after(Duration::from_millis(50)).await;
+    }
+
+    loop {
+        if let Some(config) = sta_stack.config_v4() {
+            log::info!("Got IP: {}", config.address);
+            break;
+        }
+        Timer::after(Duration::from_millis(50)).await;
+    }
+
     Ok((init, sta_stack, data))
 }
 
