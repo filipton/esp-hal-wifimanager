@@ -25,7 +25,7 @@ use esp_wifi::{
 use heapless::String;
 use httparse::Header;
 use nvs::NvsFlash;
-use structs::{AutoSetupSettings, Result, WmInnerSignals};
+use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 use tickv::TicKV;
 extern crate alloc;
 
@@ -46,11 +46,7 @@ pub async fn init_wm(
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
-) -> Result<(
-    Rc<EspWifiInitialization>,
-    &'static Stack<WifiDevice<'static, WifiStaDevice>>,
-    Option<serde_json::Value>,
-)> {
+) -> Result<WmReturn> {
     let init = Rc::new(
         esp_wifi::initialize(
             esp_wifi::EspWifiInitFor::WifiBle,
@@ -217,15 +213,22 @@ pub async fn init_wm(
         Timer::after(Duration::from_millis(50)).await;
     }
 
+    let mut ip = [0; 4];
     loop {
         if let Some(config) = sta_stack.config_v4() {
             log::info!("Got IP: {}", config.address);
+            ip.copy_from_slice(config.address.address().as_bytes());
             break;
         }
         Timer::after(Duration::from_millis(50)).await;
     }
 
-    Ok((init, sta_stack, data))
+    Ok(WmReturn {
+        wifi_init: init,
+        sta_stack,
+        data,
+        ip_address: ip,
+    })
 }
 
 #[embassy_executor::task]

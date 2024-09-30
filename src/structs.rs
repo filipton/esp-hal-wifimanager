@@ -1,4 +1,7 @@
+use alloc::rc::Rc;
+use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use esp_wifi::{wifi::{WifiDevice, WifiStaDevice}, EspWifiInitialization};
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -11,6 +14,8 @@ pub enum WmError {
     WifiError(esp_wifi::wifi::WifiError),
     WifiTaskSpawnError,
     BtTaskSpawnError,
+
+    Other
 }
 
 pub type Result<T> = core::result::Result<T, WmError>;
@@ -33,6 +38,13 @@ pub(crate) struct AutoSetupSettings {
     pub ssid: alloc::string::String,
     pub psk: alloc::string::String,
     pub data: Option<serde_json::Value>,
+}
+
+pub struct WmReturn {
+    pub wifi_init: Rc<EspWifiInitialization>,
+    pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    pub data: Option<serde_json::Value>,
+    pub ip_address: [u8; 4]
 }
 
 impl WmSettings {
