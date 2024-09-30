@@ -1,7 +1,10 @@
 use alloc::rc::Rc;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
-use esp_wifi::{wifi::{WifiDevice, WifiStaDevice}, EspWifiInitialization};
+use esp_wifi::{
+    wifi::{WifiDevice, WifiStaDevice},
+    EspWifiInitialization,
+};
 use serde::Deserialize;
 
 #[derive(Debug)]
@@ -15,7 +18,7 @@ pub enum WmError {
     WifiTaskSpawnError,
     BtTaskSpawnError,
 
-    Other
+    Other,
 }
 
 pub type Result<T> = core::result::Result<T, WmError>;
@@ -44,7 +47,18 @@ pub struct WmReturn {
     pub wifi_init: Rc<EspWifiInitialization>,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
-    pub ip_address: [u8; 4]
+    pub ip_address: [u8; 4],
+}
+
+impl ::core::fmt::Debug for WmReturn {
+    #[inline]
+    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
+        f.debug_struct("WmReturn")
+            .field("wifi_init", &self.wifi_init)
+            .field("data", &self.data)
+            .field("ip_address", &self.ip_address)
+            .finish()
+    }
 }
 
 impl WmSettings {
