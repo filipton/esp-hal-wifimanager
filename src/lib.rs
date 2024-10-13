@@ -10,7 +10,6 @@ use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal}
 use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Write;
 use esp_hal::{
-    clock::Clocks,
     peripherals::{BT, RADIO_CLK, WIFI},
     rng::Rng,
 };
@@ -42,18 +41,16 @@ pub async fn init_wm(
     timer: impl EspWifiTimerSource,
     rng: Rng,
     radio_clocks: RADIO_CLK,
-    clocks: &Clocks<'_>,
     wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
 ) -> Result<WmReturn> {
     let init = Rc::new(
-        esp_wifi::initialize(
+        esp_wifi::init(
             esp_wifi::EspWifiInitFor::WifiBle,
             timer,
             rng,
             radio_clocks,
-            &clocks,
         )
         .unwrap(),
     );

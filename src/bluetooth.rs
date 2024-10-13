@@ -34,7 +34,8 @@ pub async fn bluetooth_task(
     let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
-    let mut ble = Ble::new(connector, esp_wifi::current_millis);
+    let now = || esp_hal::time::now().duration_since_epoch().to_millis();
+    let mut ble = Ble::new(connector, now);
     loop {
         _ = ble.init().await;
         _ = ble.cmd_set_le_advertising_parameters().await;

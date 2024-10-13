@@ -6,10 +6,10 @@ edition = "2021"
 [lib]
 
 [dependencies]
-esp-hal = { version = "0.20.1", default-features = false, features = ["async"] }
-esp-hal-embassy = { version = "0.3.0", default-features = false, features = [] }
+esp-hal = { version = "0.21.0", default-features = false, features = [] }
+esp-hal-embassy = { version = "0.4.0", default-features = false, features = [] }
 embassy-net = { version = "0.4.0", default-features = false, features = ["tcp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
-esp-wifi = { version = "0.8.0", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
+esp-wifi = { version = "0.10.1", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
 bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
 static_cell = { version = "2.1.0" }
 log = "0.4.22"
@@ -24,7 +24,7 @@ esp-hal-dhcp-server = "0.1.1"
 embassy-futures = "0.1.1"
 serde = { version = "1.0.210", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.128", default-features = false, features = ["alloc"] }
-httparse = { version = "1.9.4", default-features = false }
+httparse = { version = "1.9.5", default-features = false }
 embedded-io-async = "0.6.1"
 
 [features]
