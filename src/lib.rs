@@ -17,15 +17,15 @@ use esp_hal::{
 use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
     wifi::{
-        AuthMethod, ClientConfiguration, Configuration, Protocol, WifiApDevice, WifiController,
-        WifiDevice, WifiEvent, WifiStaDevice, WifiState,
+        ClientConfiguration, Configuration, WifiApDevice, WifiController, WifiDevice, WifiEvent,
+        WifiStaDevice, WifiState,
     },
     EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
 use heapless::String;
 use httparse::Header;
 use nvs::NvsFlash;
-use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
+use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
 use tickv::TicKV;
 extern crate alloc;
 
@@ -43,10 +43,17 @@ pub async fn init_wm(
     timer: impl EspWifiTimerSource,
     rng: Rng,
     radio_clocks: RADIO_CLK,
-    wifi: WIFI,
+    mut wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
 ) -> Result<WmReturn> {
+    match init_for {
+        EspWifiInitFor::Wifi => {}
+        EspWifiInitFor::WifiBle => {}
+        EspWifiInitFor::Ble => return Err(WmError::Other),
+    }
+
+    let internal_init_for = InternalInitFor::from_init_for(&init_for);
     let init = esp_wifi::init(init_for, timer, rng.clone(), radio_clocks).unwrap();
     let init_return_signal =
         alloc::rc::Rc::new(Signal::<CriticalSectionRawMutex, EspWifiInitialization>::new());
@@ -56,53 +63,16 @@ pub async fn init_wm(
         ssid: generated_ssid,
         ..Default::default()
     };
-
-    let (ap_interface, sta_interface, mut controller) =
-        esp_wifi::wifi::new_ap_sta_with_config(&init, wifi, Default::default(), ap_config)
-            .map_err(|e| WmError::WifiError(e))?;
-
-    /*
-    let (sta_interface, mut controller) = esp_wifi::wifi::new_with_mode(&init, wifi.clone_unchecked(), WifiStaDevice)
-        .map_err(|e| WmError::WifiError(e))?;
-    */
-
     let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
-    let ap_config = Config::ipv4_static(StaticConfigV4 {
+    let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
         address: Ipv4Cidr::new(ap_ip, 24),
         gateway: Some(ap_ip),
         dns_servers: Default::default(),
     });
 
-    let ap_stack = &*{
-        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
-            static_cell::StaticCell::new();
-        STATIC_CELL.uninit().write(Stack::new(
-            ap_interface,
-            ap_config,
-            {
-                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                    static_cell::StaticCell::new();
-                STATIC_CELL.uninit().write(StackResources::<3>::new())
-            },
-            settings.wifi_seed,
-        ))
-    };
-
-    let sta_config = Config::dhcpv4(Default::default());
-    let sta_stack = &*{
-        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
-            static_cell::StaticCell::new();
-        STATIC_CELL.uninit().write(Stack::new(
-            sta_interface,
-            sta_config,
-            {
-                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                    static_cell::StaticCell::new();
-                STATIC_CELL.uninit().write(StackResources::<3>::new())
-            },
-            settings.wifi_seed,
-        ))
-    };
+    let (sta_interface, mut controller) =
+        esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)
+            .map_err(|e| WmError::WifiError(e))?;
 
     controller
         .start()
@@ -131,8 +101,9 @@ pub async fn init_wm(
         Err(_) => None,
     };
 
-    let wifi_reconnect_time = settings.wifi_reconnect_time;
-    let data = if let Some(wifi_setup) = wifi_setup {
+    //let wifi_reconnect_time = settings.wifi_reconnect_time;
+    let mut wifi_connected = false;
+    if let Some(ref wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
 
         let client_config = Configuration::Client(ClientConfiguration {
@@ -144,26 +115,58 @@ pub async fn init_wm(
             .set_configuration(&client_config)
             .map_err(|e| WmError::WifiError(e))?;
 
-        let wifi_connected = utils::try_to_wifi_connect(&mut controller, &settings).await;
-        if !wifi_connected {
-            // this will "block" it has loop
-            wifi_connection_worker(
-                settings,
-                &spawner,
-                init,
-                init_return_signal.clone(),
-                bt,
-                &nvs,
-                &mut controller,
-                ap_stack,
-            )
-            .await?
-        } else {
-            wifi_setup.data
-        }
+        wifi_connected = utils::try_to_wifi_connect(&mut controller, &settings).await;
+    }
+
+    let mut wifi_reinited = false;
+    let (data, init, sta_interface, controller) = if wifi_connected {
+        (
+            wifi_setup
+                .expect("Shouldnt fail if connected i guesss.")
+                .data,
+            init,
+            sta_interface,
+            controller,
+        )
     } else {
-        wifi_connection_worker(
-            settings,
+        drop(sta_interface);
+        drop(controller);
+
+        let init = match internal_init_for {
+            InternalInitFor::Wifi => {
+                // if wifi alone, reinit
+                wifi_reinited = true;
+                let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
+                esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk).unwrap()
+            }
+            _ => init,
+        };
+
+        let (ap_interface, sta_interface, mut controller) = esp_wifi::wifi::new_ap_sta_with_config(
+            &init,
+            unsafe { wifi.clone_unchecked() },
+            Default::default(),
+            ap_config,
+        )
+        .map_err(|e| WmError::WifiError(e))?;
+
+        let ap_stack = &*{
+            static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
+                static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write(Stack::new(
+                ap_interface,
+                ap_ip_config,
+                {
+                    static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                        static_cell::StaticCell::new();
+                    STATIC_CELL.uninit().write(StackResources::<3>::new())
+                },
+                settings.wifi_seed,
+            ))
+        };
+
+        let data = wifi_connection_worker(
+            settings.clone(),
             &spawner,
             init,
             init_return_signal.clone(),
@@ -172,28 +175,53 @@ pub async fn init_wm(
             &mut controller,
             ap_stack,
         )
-        .await?
+        .await?;
+
+        drop(sta_interface);
+        drop(controller);
+
+        let init = init_return_signal.wait().await;
+        let init = if wifi_reinited {
+            let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
+            esp_wifi::init(
+                internal_init_for.to_init_for(),
+                timer,
+                rng.clone(),
+                radio_clk,
+            )
+            .unwrap()
+        } else {
+            init
+        };
+
+        let (sta_interface, controller) = esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
+            .map_err(|e| WmError::WifiError(e))?;
+
+        (data, init, sta_interface, controller)
     };
 
-    let init = init_return_signal.wait().await;
-
-    // hack to disable ap
-    // TODO: on esp-hal with version 0.21.X deinitalize stack
-    _ = controller.set_configuration(&Configuration::AccessPoint(
-        esp_wifi::wifi::AccessPointConfiguration {
-            ssid: heapless::String::new(),
-            ssid_hidden: true,
-            channel: 0,
-            secondary_channel: None,
-            protocols: Protocol::P802D11B.into(),
-            auth_method: AuthMethod::None,
-            password: heapless::String::new(),
-            max_connections: 0,
-        },
-    ));
+    let sta_config = Config::dhcpv4(Default::default());
+    let sta_stack = &*{
+        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
+            static_cell::StaticCell::new();
+        STATIC_CELL.uninit().write(Stack::new(
+            sta_interface,
+            sta_config,
+            {
+                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                    static_cell::StaticCell::new();
+                STATIC_CELL.uninit().write(StackResources::<3>::new())
+            },
+            settings.wifi_seed,
+        ))
+    };
 
     spawner
-        .spawn(connection(wifi_reconnect_time, controller, sta_stack))
+        .spawn(connection(
+            settings.wifi_reconnect_time,
+            controller,
+            sta_stack,
+        ))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
     spawner

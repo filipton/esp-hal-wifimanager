@@ -7,9 +7,10 @@ use embassy_time::Timer;
 use esp_backtrace as _;
 use esp_hal::{
     prelude::*,
-    timer::{timg::TimerGroup, OneShotTimer, PeriodicTimer},
+    timer::timg::TimerGroup,
 };
 
+/*
 // TODO: maybe i should make another crate for this make_static?
 /// This is macro from static_cell (static_cell::make_static!) but without weird stuff
 macro_rules! make_static {
@@ -19,6 +20,7 @@ macro_rules! make_static {
         STATIC_CELL.uninit().write($val)
     }};
 }
+*/
 
 #[main]
 async fn main(spawner: Spawner) {
@@ -46,6 +48,7 @@ async fn main(spawner: Spawner) {
         _ = core::fmt::write(&mut generated_name, format_args!("TEST-{:X}", efuse));
         generated_name
     };
+    wm_settings.wifi_conn_timeout = 30000;
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let wifi_res = esp_hal_wifimanager::init_wm(

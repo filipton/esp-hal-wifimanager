@@ -1,9 +1,7 @@
-use alloc::rc::Rc;
 use embassy_net::Stack;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use esp_wifi::{
-    wifi::{WifiDevice, WifiStaDevice},
-    EspWifiInitialization,
+    wifi::{WifiDevice, WifiStaDevice}, EspWifiInitFor, EspWifiInitialization
 };
 use serde::Deserialize;
 
@@ -101,6 +99,31 @@ impl WmInnerSignals {
             wifi_scan_res: Mutex::new(alloc::string::String::new()),
             wifi_conn_info_sig: Signal::new(),
             wifi_conn_res_sig: Signal::new(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum InternalInitFor {
+    Wifi,
+    Ble,
+    WifiBle
+}
+
+impl InternalInitFor {
+    pub fn to_init_for(&self) -> EspWifiInitFor {
+        match self {
+            InternalInitFor::Wifi => EspWifiInitFor::Wifi,
+            InternalInitFor::Ble => EspWifiInitFor::Ble,
+            InternalInitFor::WifiBle => EspWifiInitFor::WifiBle,
+        }
+    }
+
+    pub fn from_init_for(init_for: &EspWifiInitFor) -> Self {
+        match init_for {
+            EspWifiInitFor::Wifi => Self::Wifi,
+            EspWifiInitFor::Ble => Self::Ble,
+            EspWifiInitFor::WifiBle => Self::WifiBle,
         }
     }
 }
