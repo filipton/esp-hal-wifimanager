@@ -9,6 +9,7 @@ use embassy_net::{
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Write;
+use esp_hal::peripheral::Peripheral;
 use esp_hal::{
     peripherals::{BT, RADIO_CLK, WIFI},
     rng::Rng,
@@ -19,7 +20,7 @@ use esp_wifi::{
         AuthMethod, ClientConfiguration, Configuration, Protocol, WifiApDevice, WifiController,
         WifiDevice, WifiEvent, WifiStaDevice, WifiState,
     },
-    EspWifiInitialization, EspWifiTimerSource,
+    EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
 use heapless::String;
 use httparse::Header;
@@ -37,6 +38,7 @@ mod structs;
 mod utils;
 
 pub async fn init_wm(
+    init_for: EspWifiInitFor,
     settings: WmSettings,
     timer: impl EspWifiTimerSource,
     rng: Rng,
@@ -45,15 +47,9 @@ pub async fn init_wm(
     bt: BT,
     spawner: &Spawner,
 ) -> Result<WmReturn> {
-    let init = Rc::new(
-        esp_wifi::init(
-            esp_wifi::EspWifiInitFor::WifiBle,
-            timer,
-            rng,
-            radio_clocks,
-        )
-        .unwrap(),
-    );
+    let init = esp_wifi::init(init_for, timer, rng.clone(), radio_clocks).unwrap();
+    let init_return_signal =
+        alloc::rc::Rc::new(Signal::<CriticalSectionRawMutex, EspWifiInitialization>::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
@@ -66,9 +62,8 @@ pub async fn init_wm(
             .map_err(|e| WmError::WifiError(e))?;
 
     /*
-    let (wifi_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
-            .map_err(|e| WmError::WifiError(e))?;
+    let (sta_interface, mut controller) = esp_wifi::wifi::new_with_mode(&init, wifi.clone_unchecked(), WifiStaDevice)
+        .map_err(|e| WmError::WifiError(e))?;
     */
 
     let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
@@ -136,8 +131,6 @@ pub async fn init_wm(
         Err(_) => None,
     };
 
-    //drop(nvs);
-
     let wifi_reconnect_time = settings.wifi_reconnect_time;
     let data = if let Some(wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
@@ -157,7 +150,8 @@ pub async fn init_wm(
             wifi_connection_worker(
                 settings,
                 &spawner,
-                init.clone(),
+                init,
+                init_return_signal.clone(),
                 bt,
                 &nvs,
                 &mut controller,
@@ -171,7 +165,8 @@ pub async fn init_wm(
         wifi_connection_worker(
             settings,
             &spawner,
-            init.clone(),
+            init,
+            init_return_signal.clone(),
             bt,
             &nvs,
             &mut controller,
@@ -179,6 +174,8 @@ pub async fn init_wm(
         )
         .await?
     };
+
+    let init = init_return_signal.wait().await;
 
     // hack to disable ap
     // TODO: on esp-hal with version 0.21.X deinitalize stack
@@ -386,7 +383,8 @@ async fn run_http_server(
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
-    init: Rc<EspWifiInitialization>,
+    init: EspWifiInitialization,
+    init_return_signal: Rc<Signal<CriticalSectionRawMutex, EspWifiInitialization>>,
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
@@ -408,6 +406,7 @@ async fn wifi_connection_worker(
     spawner
         .spawn(bluetooth::bluetooth_task(
             init,
+            init_return_signal,
             bt,
             generated_ssid,
             wm_signals.clone(),

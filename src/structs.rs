@@ -44,7 +44,7 @@ pub(crate) struct AutoSetupSettings {
 }
 
 pub struct WmReturn {
-    pub wifi_init: Rc<EspWifiInitialization>,
+    pub wifi_init: EspWifiInitialization,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],

@@ -25,7 +25,8 @@ use crate::structs::WmInnerSignals;
 
 #[embassy_executor::task]
 pub async fn bluetooth_task(
-    init: Rc<EspWifiInitialization>,
+    init: EspWifiInitialization,
+    init_return_signal: Rc<Signal<CriticalSectionRawMutex, EspWifiInitialization>>,
     mut bt: BT,
     name: String<32>,
     signals: Rc<WmInnerSignals>,
@@ -34,6 +35,8 @@ pub async fn bluetooth_task(
     let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
+    init_return_signal.signal(init); // return the init value
+
     let now = || esp_hal::time::now().duration_since_epoch().to_millis();
     let mut ble = Ble::new(connector, now);
     loop {

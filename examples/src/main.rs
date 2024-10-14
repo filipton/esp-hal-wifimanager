@@ -49,6 +49,7 @@ async fn main(spawner: Spawner) {
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let wifi_res = esp_hal_wifimanager::init_wm(
+        esp_wifi::EspWifiInitFor::WifiBle,
         wm_settings,
         timg0.timer0,
         rng.clone(),
