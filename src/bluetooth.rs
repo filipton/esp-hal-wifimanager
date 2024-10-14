@@ -8,6 +8,7 @@ use bleps::{
     attribute_server::WorkResult,
     gatt,
 };
+use embassy_futures::select::Either::{First, Second};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
@@ -30,6 +31,7 @@ pub async fn bluetooth_task(
     mut bt: BT,
     name: String<32>,
     signals: Rc<WmInnerSignals>,
+    ble_task_end_sig: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     let ble_data = Rc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
     let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
@@ -97,7 +99,16 @@ pub async fn bluetooth_task(
         let mut rng = bleps::no_rng::NoRng;
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
         loop {
-            match srv.do_work().await {
+            let fut = embassy_futures::select::select(srv.do_work(), ble_task_end_sig.wait()).await;
+            let work = match fut {
+                First(work) => work,
+                Second(_) => {
+                    log::warn!("Stop ble task!");
+                    return;
+                }
+            };
+
+            match work {
                 Ok(res) => {
                     if let WorkResult::GotDisconnected = res {
                         break;
@@ -119,6 +130,7 @@ pub async fn bluetooth_task(
 
                 let wifi_connected = signals.wifi_conn_res_sig.wait().await;
                 if wifi_connected {
+                    log::warn!("Stop ble task!");
                     return;
                 }
             }

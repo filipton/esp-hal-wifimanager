@@ -1,7 +1,11 @@
-use crate::WmSettings;
+use crate::{structs::AutoSetupSettings, WmSettings, WmError, Result};
+use core::str::FromStr;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_wifi::wifi::{WifiController, WifiDevice, WifiStaDevice};
+use esp_wifi::wifi::{
+    ClientConfiguration, Configuration, WifiController, WifiDevice, WifiStaDevice,
+};
+use heapless::String;
 use httparse::Header;
 
 pub fn construct_http_resp(
@@ -33,9 +37,11 @@ pub async fn try_to_wifi_connect(
 ) -> bool {
     let start_time = embassy_time::Instant::now();
 
+    controller.stop().await;
+    controller.start().await;
     loop {
         if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
-            log::warn!("Connect timeout!");
+            log::warn!("Connect timeout 1!");
             return false;
         }
 

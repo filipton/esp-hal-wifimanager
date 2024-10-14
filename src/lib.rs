@@ -129,6 +129,7 @@ pub async fn init_wm(
             controller,
         )
     } else {
+        _ = controller.stop().await;
         drop(sta_interface);
         drop(controller);
 
@@ -149,6 +150,11 @@ pub async fn init_wm(
             ap_config,
         )
         .map_err(|e| WmError::WifiError(e))?;
+
+        controller
+            .start()
+            .await
+            .map_err(|e| WmError::WifiError(e))?;
 
         let ap_stack = &*{
             static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
@@ -177,9 +183,14 @@ pub async fn init_wm(
         )
         .await?;
 
+        log::warn!("pre timer1");
+        Timer::after_millis(1000).await;
+        _ = controller.stop().await;
         drop(sta_interface);
         drop(controller);
 
+        Timer::after_millis(1000).await;
+        log::warn!("after timer2");
         let init = init_return_signal.wait().await;
         let init = if wifi_reinited {
             let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
@@ -194,7 +205,13 @@ pub async fn init_wm(
             init
         };
 
-        let (sta_interface, controller) = esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
+        let (sta_interface, mut controller) =
+            esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
+                .map_err(|e| WmError::WifiError(e))?;
+
+        controller
+            .start()
+            .await
             .map_err(|e| WmError::WifiError(e))?;
 
         (data, init, sta_interface, controller)
@@ -277,135 +294,140 @@ async fn run_http_server(
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
+    close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
-    let mut rx_buffer = [0; 4096];
-    let mut tx_buffer = [0; 4096];
+    let fut = async {
+        let mut rx_buffer = [0; 4096];
+        let mut tx_buffer = [0; 4096];
 
-    let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
-    socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
+        let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
+        socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
 
-    let mut buf = [0; 2048];
-    loop {
-        if let Err(e) = socket
-            .accept(IpListenEndpoint {
-                addr: None,
-                port: 80,
-            })
-            .await
-        {
-            log::error!("socket.accept error: {e:?}");
-        }
-
+        let mut buf = [0; 2048];
         loop {
-            match socket.read(&mut buf).await {
-                Ok(0) => {
-                    log::warn!("socket.read EOF");
-                    break;
-                }
-                Ok(n) => {
-                    let mut headers = [httparse::EMPTY_HEADER; 32];
-                    let mut req = httparse::Request::new(&mut headers);
+            if let Err(e) = socket
+                .accept(IpListenEndpoint {
+                    addr: None,
+                    port: 80,
+                })
+                .await
+            {
+                log::error!("socket.accept error: {e:?}");
+            }
 
-                    let body_offset = match req.parse(&buf[..n]) {
-                        Ok(res) => {
-                            if res.is_partial() {
-                                log::error!("request is partial");
+            loop {
+                match socket.read(&mut buf).await {
+                    Ok(0) => {
+                        log::warn!("socket.read EOF");
+                        break;
+                    }
+                    Ok(n) => {
+                        let mut headers = [httparse::EMPTY_HEADER; 32];
+                        let mut req = httparse::Request::new(&mut headers);
+
+                        let body_offset = match req.parse(&buf[..n]) {
+                            Ok(res) => {
+                                if res.is_partial() {
+                                    log::error!("request is partial");
+                                    break;
+                                }
+
+                                res.unwrap()
+                            }
+                            Err(e) => {
+                                log::error!("request.parse error: {e:?}");
                                 break;
                             }
+                        };
 
-                            res.unwrap()
-                        }
-                        Err(e) => {
-                            log::error!("request.parse error: {e:?}");
-                            break;
-                        }
-                    };
+                        let (path, method) = (req.path.unwrap_or("/"), req.method.unwrap_or("GET"));
+                        match (path, method) {
+                            ("/", "GET") => {
+                                let resp_len = alloc::format!("{}", wifi_panel_str.len());
+                                let http_resp = utils::construct_http_resp(
+                                    200,
+                                    "OK",
+                                    &[
+                                        Header {
+                                            name: "Content-Type",
+                                            value: b"text/html",
+                                        },
+                                        Header {
+                                            name: "Content-Length",
+                                            value: resp_len.as_bytes(),
+                                        },
+                                    ],
+                                    wifi_panel_str.as_bytes(),
+                                );
 
-                    let (path, method) = (req.path.unwrap_or("/"), req.method.unwrap_or("GET"));
-                    match (path, method) {
-                        ("/", "GET") => {
-                            let resp_len = alloc::format!("{}", wifi_panel_str.len());
-                            let http_resp = utils::construct_http_resp(
-                                200,
-                                "OK",
-                                &[
-                                    Header {
-                                        name: "Content-Type",
-                                        value: b"text/html",
-                                    },
-                                    Header {
-                                        name: "Content-Length",
-                                        value: resp_len.as_bytes(),
-                                    },
-                                ],
-                                wifi_panel_str.as_bytes(),
-                            );
+                                let res = socket.write_all(&http_resp).await;
+                                if let Err(e) = res {
+                                    log::error!("socket.write_all err: {e:?}");
+                                    break;
+                                }
 
-                            let res = socket.write_all(&http_resp).await;
-                            if let Err(e) = res {
-                                log::error!("socket.write_all err: {e:?}");
-                                break;
+                                _ = socket.flush().await;
                             }
+                            ("/setup", "POST") => {
+                                signals
+                                    .wifi_conn_info_sig
+                                    .signal(buf[body_offset..n].to_vec());
+                                let wifi_connected = signals.wifi_conn_res_sig.wait().await;
+                                let resp = alloc::format!("{}", wifi_connected);
+                                let resp_len = alloc::format!("{}", resp.len());
 
-                            _ = socket.flush().await;
-                        }
-                        ("/setup", "POST") => {
-                            signals
-                                .wifi_conn_info_sig
-                                .signal(buf[body_offset..n].to_vec());
-                            let wifi_connected = signals.wifi_conn_res_sig.wait().await;
-                            let resp = alloc::format!("{}", wifi_connected);
-                            let resp_len = alloc::format!("{}", resp.len());
-
-                            let http_resp = utils::construct_http_resp(
-                                200,
-                                "OK",
-                                &[Header {
-                                    name: "Content-Length",
-                                    value: resp_len.as_bytes(),
-                                }],
-                                resp.as_bytes(),
-                            );
-
-                            let res = socket.write_all(&http_resp).await;
-                            if let Err(e) = res {
-                                log::error!("socket.write_all err: {e:?}");
-                                break;
-                            }
-
-                            _ = socket.flush().await;
-                        }
-                        _ => {
-                            log::warn!("NOT FOUND: {req:?}");
-                            let res = socket
-                                .write_all(&utils::construct_http_resp(
-                                    404,
-                                    "Not Found",
+                                let http_resp = utils::construct_http_resp(
+                                    200,
+                                    "OK",
                                     &[Header {
                                         name: "Content-Length",
-                                        value: b"0",
+                                        value: resp_len.as_bytes(),
                                     }],
-                                    &[],
-                                ))
-                                .await;
+                                    resp.as_bytes(),
+                                );
 
-                            if let Err(e) = res {
-                                log::error!("socket.write_all err: {e:?}");
-                                break;
+                                let res = socket.write_all(&http_resp).await;
+                                if let Err(e) = res {
+                                    log::error!("socket.write_all err: {e:?}");
+                                    break;
+                                }
+
+                                _ = socket.flush().await;
+                            }
+                            _ => {
+                                log::warn!("NOT FOUND: {req:?}");
+                                let res = socket
+                                    .write_all(&utils::construct_http_resp(
+                                        404,
+                                        "Not Found",
+                                        &[Header {
+                                            name: "Content-Length",
+                                            value: b"0",
+                                        }],
+                                        &[],
+                                    ))
+                                    .await;
+
+                                if let Err(e) = res {
+                                    log::error!("socket.write_all err: {e:?}");
+                                    break;
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    log::error!("socket.read error: {e:?}");
-                    break;
+                    Err(e) => {
+                        log::error!("socket.read error: {e:?}");
+                        break;
+                    }
                 }
             }
-        }
 
-        _ = socket.close();
-        _ = socket.abort();
-    }
+            _ = socket.close();
+            _ = socket.abort();
+        }
+    };
+
+    embassy_futures::select::select(fut, close_signal.wait()).await;
 }
 
 async fn wifi_connection_worker(
@@ -418,7 +440,9 @@ async fn wifi_connection_worker(
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
 ) -> Result<Option<serde_json::Value>> {
-    static AP_CLOSE_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+    let ap_end_sig = Rc::new(Signal::new());
+    let http_server_sig = Rc::new(Signal::new());
+    let ble_end_task_sig = Rc::new(Signal::new());
     let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
@@ -428,6 +452,7 @@ async fn wifi_connection_worker(
             ap_stack,
             wm_signals.clone(),
             settings.wifi_panel,
+            http_server_sig.clone(),
         ))
         .unwrap();
 
@@ -438,10 +463,13 @@ async fn wifi_connection_worker(
             bt,
             generated_ssid,
             wm_signals.clone(),
+            ble_end_task_sig.clone(),
         ))
         .map_err(|_| WmError::BtTaskSpawnError)?;
 
-    spawner.spawn(ap_task(ap_stack, &AP_CLOSE_SIGNAL)).unwrap();
+    spawner
+        .spawn(ap_task(ap_stack, ap_end_sig.clone()))
+        .unwrap();
 
     let mut last_scan = Instant::MIN;
     loop {
@@ -466,7 +494,11 @@ async fn wifi_connection_worker(
                     .map_err(|e| WmError::FlashError(e))?;
 
                 esp_hal_dhcp_server::dhcp_close();
-                AP_CLOSE_SIGNAL.signal(());
+                ap_end_sig.signal(());
+                http_server_sig.signal(());
+                ble_end_task_sig.signal(());
+
+                Timer::after_millis(100).await;
                 return Ok(setup_info.data);
             }
         }
@@ -539,7 +571,7 @@ async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
 #[embassy_executor::task]
 async fn ap_task(
     stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
-    close_signal: &'static Signal<CriticalSectionRawMutex, ()>,
+    close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
 }
