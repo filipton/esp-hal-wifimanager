@@ -1,11 +1,6 @@
-use crate::{structs::AutoSetupSettings, WmSettings, WmError, Result};
-use core::str::FromStr;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_wifi::wifi::{
-    ClientConfiguration, Configuration, WifiController, WifiDevice, WifiStaDevice,
-};
-use heapless::String;
+use esp_wifi::wifi::{WifiController, WifiDevice, WifiStaDevice};
 use httparse::Header;
 
 pub fn construct_http_resp(
@@ -33,20 +28,20 @@ pub fn construct_http_resp(
 
 pub async fn try_to_wifi_connect(
     controller: &mut WifiController<'static>,
-    settings: &WmSettings,
+    wifi_conn_timeout: u64,
 ) -> bool {
     let start_time = embassy_time::Instant::now();
+    _ = controller.stop().await;
+    _ = controller.start().await;
 
-    controller.stop().await;
-    controller.start().await;
     loop {
-        if start_time.elapsed().as_millis() > settings.wifi_conn_timeout {
+        if start_time.elapsed().as_millis() > wifi_conn_timeout {
             log::warn!("Connect timeout 1!");
             return false;
         }
 
         match with_timeout(
-            Duration::from_millis(settings.wifi_conn_timeout),
+            Duration::from_millis(wifi_conn_timeout),
             controller.connect(),
         )
         .await
@@ -68,20 +63,25 @@ pub async fn try_to_wifi_connect(
     }
 }
 
-pub async fn wifi_wait_for_ip(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
+pub async fn wifi_wait_for_ip(
+    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+) -> [u8; 4] {
     while !stack.is_link_up() {
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after(Duration::from_millis(50)).await;
     }
 
     log::info!("Waiting to get IP address...");
+    let mut ip = [0; 4];
     loop {
         if let Some(config) = stack.config_v4() {
             log::info!("Got IP: {}", config.address);
+            ip.copy_from_slice(config.address.address().as_bytes());
             break;
         }
-
-        Timer::after(Duration::from_millis(500)).await;
+        Timer::after(Duration::from_millis(50)).await;
     }
+
+    ip
 }
 
 pub fn get_efuse_mac() -> u64 {

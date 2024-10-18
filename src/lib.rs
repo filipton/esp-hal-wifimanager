@@ -115,7 +115,8 @@ pub async fn init_wm(
             .set_configuration(&client_config)
             .map_err(|e| WmError::WifiError(e))?;
 
-        wifi_connected = utils::try_to_wifi_connect(&mut controller, &settings).await;
+        wifi_connected =
+            utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
     }
 
     let (data, init, sta_interface, controller) = if wifi_connected {
@@ -162,7 +163,7 @@ pub async fn init_wm(
             ))
         };
 
-        let data = wifi_connection_worker(
+        let wifi_setup = wifi_connection_worker(
             settings.clone(),
             &spawner,
             init,
@@ -197,7 +198,16 @@ pub async fn init_wm(
             .await
             .map_err(|e| WmError::WifiError(e))?;
 
-        (data, init, sta_interface, controller)
+        let client_config = Configuration::Client(ClientConfiguration {
+            ssid: String::from_str(&wifi_setup.ssid).unwrap(),
+            password: String::from_str(&wifi_setup.psk).unwrap(),
+            ..Default::default()
+        });
+        controller
+            .set_configuration(&client_config)
+            .map_err(|e| WmError::WifiError(e))?;
+
+        (wifi_setup.data, init, sta_interface, controller)
     };
 
     let sta_config = Config::dhcpv4(Default::default());
@@ -228,29 +238,11 @@ pub async fn init_wm(
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
-    log::warn!("pre link up");
-    loop {
-        if sta_stack.is_link_up() {
-            break;
-        }
-        Timer::after(Duration::from_millis(50)).await;
-    }
-
-    let mut ip = [0; 4];
-    loop {
-        if let Some(config) = sta_stack.config_v4() {
-            log::info!("Got IP: {}", config.address);
-            ip.copy_from_slice(config.address.address().as_bytes());
-            break;
-        }
-        Timer::after(Duration::from_millis(50)).await;
-    }
-
     Ok(WmReturn {
         wifi_init: init,
         sta_stack,
         data,
-        ip_address: ip,
+        ip_address: utils::wifi_wait_for_ip(&sta_stack).await,
     })
 }
 
@@ -426,7 +418,7 @@ async fn wifi_connection_worker(
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
     ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
-) -> Result<Option<serde_json::Value>> {
+) -> Result<AutoSetupSettings> {
     let ap_end_sig = Rc::new(Signal::new());
     let http_server_sig = Rc::new(Signal::new());
     let ble_end_task_sig = Rc::new(Signal::new());
@@ -474,7 +466,9 @@ async fn wifi_connection_worker(
                 .set_configuration(&client_config)
                 .map_err(|e| WmError::WifiError(e))?;
 
-            let wifi_connected = utils::try_to_wifi_connect(controller, &settings).await;
+            let wifi_connected =
+                utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await;
+
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
                 nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)
@@ -486,7 +480,7 @@ async fn wifi_connection_worker(
                 ble_end_task_sig.signal(());
 
                 Timer::after_millis(100).await;
-                return Ok(setup_info.data);
+                return Ok(setup_info);
             }
         }
 
@@ -524,14 +518,8 @@ async fn connection(
         controller.get_capabilities()
     );
 
-    let mut first_conn = true;
     loop {
         if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
-            if first_conn {
-                utils::wifi_wait_for_ip(stack).await;
-                first_conn = false;
-            }
-
             // wait until we're no longer connected
             controller.wait_for_event(WifiEvent::StaDisconnected).await;
             Timer::after(Duration::from_millis(wifi_reconnect_time)).await
@@ -540,7 +528,6 @@ async fn connection(
         match controller.connect().await {
             Ok(_) => {
                 log::info!("Wifi connected!");
-                utils::wifi_wait_for_ip(stack).await;
             }
             Err(e) => {
                 log::info!("Failed to connect to wifi: {e:?}");
