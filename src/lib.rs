@@ -183,14 +183,10 @@ pub async fn init_wm(
         )
         .await?;
 
-        log::warn!("pre timer1");
-        Timer::after_millis(1000).await;
         _ = controller.stop().await;
         drop(sta_interface);
         drop(controller);
 
-        Timer::after_millis(1000).await;
-        log::warn!("after timer2");
         let init = init_return_signal.wait().await;
         let init = if wifi_reinited {
             let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
