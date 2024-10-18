@@ -118,7 +118,6 @@ pub async fn init_wm(
         wifi_connected = utils::try_to_wifi_connect(&mut controller, &settings).await;
     }
 
-    let mut wifi_reinited = false;
     let (data, init, sta_interface, controller) = if wifi_connected {
         (
             wifi_setup
@@ -133,16 +132,8 @@ pub async fn init_wm(
         drop(sta_interface);
         drop(controller);
 
-        let init = match internal_init_for {
-            InternalInitFor::Wifi => {
-                // if wifi alone, reinit
-                wifi_reinited = true;
-                let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
-                esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk).unwrap()
-            }
-            _ => init,
-        };
-
+        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
+        let init = esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk).unwrap();
         let (ap_interface, sta_interface, mut controller) = esp_wifi::wifi::new_ap_sta_with_config(
             &init,
             unsafe { wifi.clone_unchecked() },
@@ -188,18 +179,14 @@ pub async fn init_wm(
         drop(controller);
 
         let init = init_return_signal.wait().await;
-        let init = if wifi_reinited {
-            let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
-            esp_wifi::init(
-                internal_init_for.to_init_for(),
-                timer,
-                rng.clone(),
-                radio_clk,
-            )
-            .unwrap()
-        } else {
-            init
-        };
+        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
+        let init = esp_wifi::init(
+            internal_init_for.to_init_for(),
+            timer,
+            rng.clone(),
+            radio_clk,
+        )
+        .unwrap();
 
         let (sta_interface, mut controller) =
             esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
@@ -241,6 +228,7 @@ pub async fn init_wm(
         .spawn(sta_task(sta_stack))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
+    log::warn!("pre link up");
     loop {
         if sta_stack.is_link_up() {
             break;
@@ -283,6 +271,8 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
         &mut leaser,
     )
     .await;
+
+    log::warn!("stop dhcp server");
 }
 
 #[embassy_executor::task]
@@ -424,6 +414,7 @@ async fn run_http_server(
     };
 
     embassy_futures::select::select(fut, close_signal.wait()).await;
+    log::warn!("stop http server");
 }
 
 async fn wifi_connection_worker(
@@ -570,4 +561,5 @@ async fn ap_task(
     close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
+    log::warn!("stop ap task");
 }
