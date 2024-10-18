@@ -148,6 +148,17 @@ pub async fn init_wm(
             .await
             .map_err(|e| WmError::WifiError(e))?;
 
+        let ap_stack = Rc::new(Stack::new(
+            ap_interface,
+            ap_ip_config,
+            {
+                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                    static_cell::StaticCell::new();
+                STATIC_CELL.uninit().write(StackResources::<3>::new())
+            },
+            settings.wifi_seed,
+        ));
+        /*
         let ap_stack = &*{
             static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
                 static_cell::StaticCell::new();
@@ -162,6 +173,7 @@ pub async fn init_wm(
                 settings.wifi_seed,
             ))
         };
+        */
 
         let wifi_setup = wifi_connection_worker(
             settings.clone(),
@@ -269,7 +281,7 @@ async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevi
 
 #[embassy_executor::task]
 async fn run_http_server(
-    ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
     close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
@@ -278,7 +290,7 @@ async fn run_http_server(
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
 
-        let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = TcpSocket::new(&ap_stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
 
         let mut buf = [0; 2048];
@@ -417,7 +429,7 @@ async fn wifi_connection_worker(
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
-    ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
 ) -> Result<AutoSetupSettings> {
     let ap_end_sig = Rc::new(Signal::new());
     let http_server_sig = Rc::new(Signal::new());
@@ -425,10 +437,10 @@ async fn wifi_connection_worker(
     let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
+    //spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
     spawner
         .spawn(run_http_server(
-            ap_stack,
+            ap_stack.clone(),
             wm_signals.clone(),
             settings.wifi_panel,
             http_server_sig.clone(),
@@ -544,7 +556,7 @@ async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
 
 #[embassy_executor::task]
 async fn ap_task(
-    stack: &'static Stack<WifiDevice<'static, WifiApDevice>>,
+    stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
     close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     embassy_futures::select::select(stack.run(), close_signal.wait()).await;
