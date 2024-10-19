@@ -158,22 +158,6 @@ pub async fn init_wm(
             },
             settings.wifi_seed,
         ));
-        /*
-        let ap_stack = &*{
-            static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiApDevice>>> =
-                static_cell::StaticCell::new();
-            STATIC_CELL.uninit().write(Stack::new(
-                ap_interface,
-                ap_ip_config,
-                {
-                    static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                        static_cell::StaticCell::new();
-                    STATIC_CELL.uninit().write(StackResources::<3>::new())
-                },
-                settings.wifi_seed,
-            ))
-        };
-        */
 
         let wifi_setup = wifi_connection_worker(
             settings.clone(),
@@ -364,6 +348,33 @@ async fn run_http_server(
                                     .signal(buf[body_offset..n].to_vec());
                                 let wifi_connected = signals.wifi_conn_res_sig.wait().await;
                                 let resp = alloc::format!("{}", wifi_connected);
+                                let resp_len = alloc::format!("{}", resp.len());
+
+                                let http_resp = utils::construct_http_resp(
+                                    200,
+                                    "OK",
+                                    &[Header {
+                                        name: "Content-Length",
+                                        value: resp_len.as_bytes(),
+                                    }],
+                                    resp.as_bytes(),
+                                );
+
+                                let res = socket.write_all(&http_resp).await;
+                                if let Err(e) = res {
+                                    log::error!("socket.write_all err: {e:?}");
+                                    break;
+                                }
+
+                                _ = socket.flush().await;
+                            }
+                            ("/list", "GET") => {
+                                let resp_res = signals.wifi_scan_res.try_lock();
+                                let resp = match resp_res {
+                                    Ok(ref resp) => resp.as_str(),
+                                    Err(_) => ""
+                                };
+
                                 let resp_len = alloc::format!("{}", resp.len());
 
                                 let http_resp = utils::construct_http_resp(

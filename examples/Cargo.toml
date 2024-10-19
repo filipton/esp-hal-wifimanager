@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 esp-backtrace = { version = "0.14.2", features = [ "esp32s3", "exception-handler", "panic-handler", "println" ] }
-esp-hal = { version = "0.21.0", features = [ "esp32s3" ] }
+esp-hal = { version = "0.21.1", features = [ "esp32s3" ] }
 esp-println = { version = "0.12.0", features = ["esp32s3", "log"] }
 log = { version = "0.4.22" }
 esp-wifi = { version = "0.10.1", features = [ "esp32s3", "phy-enable-usb", "coex" ] }

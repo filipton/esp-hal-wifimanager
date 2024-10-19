@@ -7,6 +7,11 @@
             flex-direction: column;
         }
 
+        #list {
+            display: flex;
+            flex-direction: column;
+        }
+
         #panel>input {
             padding: 5px;
             margin-bottom: 3px;
@@ -16,6 +21,13 @@
 
 <body>
     <h1>Simple panel test:</h1>
+
+    <h2>Network list:</h2>
+    <div id="list">
+    </div>
+
+    <br />
+    <h2>WIFI credentials:</h2>
     <form id="panel">
         <input id="ssid" type="text" placeholder="Enter SSID..." />
         <input id="psk" type="password" placeholder="Enter PSK..." />
@@ -44,6 +56,38 @@
                 alert(`Fetch err: ${e}`);
             }
         });
+
+        function selectSSID(text) {
+            document.querySelector("#ssid").value = text;
+        }
+
+        async function getApList() {
+            try {
+                let res = await fetch("/list");
+                let text = await res.text();
+                showApList(text);
+            } catch (e) {
+                alert(`List fetch err: ${e}`);
+            }
+        }
+
+        function showApList(res) {
+            document.querySelector('#list').innerHTML = "";
+
+            let wifis = res.split("\n");
+            for (let wifi of wifis) {
+                let split = wifi.split(": ");
+                if (split.length != 2) continue;
+
+                let ssid = split[0];
+                let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100)
+
+                document.querySelector('#list').innerHTML += `<span style="cursor: pointer;" onclick="selectSSID('${ssid}')">${ssid} | ${power}%</span> <br />`;
+            }
+        }
+
+        setInterval(getApList, 15000);
+        getApList();
     </script>
 </body>
 

@@ -6,7 +6,7 @@ edition = "2021"
 [lib]
 
 [dependencies]
-esp-hal = { version = "0.21.0", default-features = false, features = [] }
+esp-hal = { version = "0.21.1", default-features = false, features = [] }
 esp-hal-embassy = { version = "0.4.0", default-features = false, features = [] }
 embassy-net = { version = "0.4.0", default-features = false, features = ["tcp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
 esp-wifi = { version = "0.10.1", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
@@ -17,13 +17,13 @@ embassy-time = { version = "0.3.2", default-features = false }
 embassy-executor = { version = "0.6.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false }
 embassy-sync = { version = "0.6.0", default-features = false }
-esp-storage = { version = "0.3.0", default-features = false, features = ["storage", "critical-section"] }
+esp-storage = { version = "0.3.1", default-features = false, features = ["storage", "critical-section"] }
 embedded-storage = "0.3.1"
 tickv = "1.0.0"
 esp-hal-dhcp-server = { version = "0.1.2", features = ["alloc"] }
 embassy-futures = "0.1.1"
 serde = { version = "1.0.210", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1.0.128", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.131", default-features = false, features = ["alloc"] }
 httparse = { version = "1.9.5", default-features = false }
 embedded-io-async = "0.6.1"
 
