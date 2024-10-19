@@ -244,27 +244,25 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "edge-dhcp"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219bb7ddf5c8dafa4f2d39a7e41d67989f49c501752f599fdfccae86097e65ec"
+checksum = "40b68d2c31cfa4d4bb4a8647ccf9469912164b975c063fc9a25f8ef19c53b1b6"
 dependencies = [
  "edge-raw",
  "embassy-time",
  "heapless",
  "log",
- "no-std-net",
  "num_enum",
  "rand_core",
 ]
 
 [[package]]
 name = "edge-raw"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cb0fe4eeca2f029733c99469b16c8473fbc0a8ebc3f675be286c3f74bf81b59"
+checksum = "0cd56f6f142c3f9076b954b3f104e3c0e1145003a392e8f58285e14ecd937aa6"
 dependencies = [
  "log",
- "no-std-net",
 ]
 
 [[package]]
@@ -619,9 +617,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-dhcp-server"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df286ed02f357c1182b931692cb3df61f7e1be751a78ec375f6dcbee8b0829ce"
+checksum = "11ed620feb1f943e980456be823fd32c57010fdb85fe279d80580154eff6fe8b"
 dependencies = [
  "edge-dhcp",
  "embassy-futures",

@@ -242,7 +242,7 @@ pub async fn init_wm(
         .spawn(connection(
             settings.wifi_reconnect_time,
             controller,
-            sta_stack,
+            //sta_stack,
         ))
         .map_err(|_| WmError::WifiTaskSpawnError)?;
 
@@ -259,7 +259,7 @@ pub async fn init_wm(
 }
 
 #[embassy_executor::task]
-async fn run_dhcp_server(ap_stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+async fn run_dhcp_server(ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>) {
     let mut leaser =
         esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(Ipv4Addr::new(192, 168, 4, 100));
 
@@ -437,7 +437,7 @@ async fn wifi_connection_worker(
     let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    //spawner.spawn(run_dhcp_server(ap_stack)).unwrap();
+    spawner.spawn(run_dhcp_server(ap_stack.clone())).unwrap();
     spawner
         .spawn(run_http_server(
             ap_stack.clone(),
@@ -523,7 +523,7 @@ async fn wifi_connection_worker(
 async fn connection(
     wifi_reconnect_time: u64,
     mut controller: WifiController<'static>,
-    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
     log::info!(
         "WIFI Device capabilities: {:?}",
