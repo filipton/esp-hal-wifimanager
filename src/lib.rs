@@ -1,12 +1,12 @@
 #![no_std]
 
 use alloc::rc::Rc;
-use core::{ops::DerefMut, str::FromStr};
+use core::ops::DerefMut;
 use embassy_executor::Spawner;
 use embassy_net::{
     tcp::TcpSocket, Config, IpListenEndpoint, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
 };
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use embedded_io_async::Write;
 use esp_hal::peripheral::Peripheral;
@@ -16,13 +16,9 @@ use esp_hal::{
 };
 use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
-    wifi::{
-        ClientConfiguration, Configuration, WifiApDevice, WifiController, WifiDevice, WifiEvent,
-        WifiStaDevice, WifiState,
-    },
+    wifi::{WifiApDevice, WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
     EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
-use heapless::String;
 use httparse::Header;
 use nvs::NvsFlash;
 use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
@@ -54,9 +50,9 @@ pub async fn init_wm(
     }
 
     let init_for = InternalInitFor::from_init_for(&init_for);
-    let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clocks).unwrap();
+    let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clocks)?;
     let init_return_signal =
-        alloc::rc::Rc::new(Signal::<CriticalSectionRawMutex, EspWifiInitialization>::new());
+        alloc::rc::Rc::new(Signal::<NoopRawMutex, EspWifiInitialization>::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
@@ -71,13 +67,9 @@ pub async fn init_wm(
     });
 
     let (sta_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)
-            .map_err(|e| WmError::WifiError(e))?;
+        esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)?;
 
-    controller
-        .start()
-        .await
-        .map_err(|e| WmError::WifiError(e))?;
+    controller.start().await?;
 
     let mut read_buf: [u8; 1024] = [0; 1024];
     let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
@@ -85,8 +77,7 @@ pub async fn init_wm(
         &mut read_buf,
         settings.flash_size,
     );
-    nvs.initialise(nvs::hash(tickv::MAIN_KEY))
-        .map_err(|e| WmError::FlashError(e))?;
+    nvs.initialise(nvs::hash(tickv::MAIN_KEY))?;
 
     let mut wifi_setup = [0; 1024];
     let wifi_setup = match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
@@ -96,7 +87,9 @@ pub async fn init_wm(
                 .position(|&x| x == 0x00)
                 .unwrap_or(wifi_setup.len());
 
-            Some(serde_json::from_slice::<AutoSetupSettings>(&wifi_setup[..end_pos]).unwrap())
+            Some(serde_json::from_slice::<AutoSetupSettings>(
+                &wifi_setup[..end_pos],
+            )?)
         }
         Err(_) => None,
     };
@@ -105,15 +98,7 @@ pub async fn init_wm(
     let mut wifi_connected = false;
     if let Some(ref wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
-
-        let client_config = Configuration::Client(ClientConfiguration {
-            ssid: String::from_str(&wifi_setup.ssid).unwrap(),
-            password: String::from_str(&wifi_setup.psk).unwrap(),
-            ..Default::default()
-        });
-        controller
-            .set_configuration(&client_config)
-            .map_err(|e| WmError::WifiError(e))?;
+        controller.set_configuration(&wifi_setup.to_client_conf()?)?;
 
         wifi_connected =
             utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
@@ -133,20 +118,16 @@ pub async fn init_wm(
         drop(sta_interface);
         drop(controller);
 
-        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
-        let init = esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk).unwrap();
+        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
+        let init = esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk)?;
         let (ap_interface, sta_interface, mut controller) = esp_wifi::wifi::new_ap_sta_with_config(
             &init,
             unsafe { wifi.clone_unchecked() },
             Default::default(),
             ap_config,
-        )
-        .map_err(|e| WmError::WifiError(e))?;
+        )?;
 
-        controller
-            .start()
-            .await
-            .map_err(|e| WmError::WifiError(e))?;
+        controller.start().await?;
 
         let ap_stack = Rc::new(Stack::new(
             ap_interface,
@@ -176,26 +157,14 @@ pub async fn init_wm(
         drop(controller);
 
         let init = init_return_signal.wait().await;
-        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
-        let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clk).unwrap();
+        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
+        let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clk)?;
 
         let (sta_interface, mut controller) =
-            esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
-                .map_err(|e| WmError::WifiError(e))?;
+            esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)?;
 
-        controller
-            .start()
-            .await
-            .map_err(|e| WmError::WifiError(e))?;
-
-        let client_config = Configuration::Client(ClientConfiguration {
-            ssid: String::from_str(&wifi_setup.ssid).unwrap(),
-            password: String::from_str(&wifi_setup.psk).unwrap(),
-            ..Default::default()
-        });
-        controller
-            .set_configuration(&client_config)
-            .map_err(|e| WmError::WifiError(e))?;
+        controller.start().await?;
+        controller.set_configuration(&wifi_setup.to_client_conf()?)?;
 
         (wifi_setup.data, init, sta_interface, controller)
     };
@@ -216,17 +185,13 @@ pub async fn init_wm(
         ))
     };
 
-    spawner
-        .spawn(connection(
-            settings.wifi_reconnect_time,
-            controller,
-            //sta_stack,
-        ))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(connection(
+        settings.wifi_reconnect_time,
+        controller,
+        //sta_stack,
+    ))?;
 
-    spawner
-        .spawn(sta_task(sta_stack))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(sta_task(sta_stack))?;
 
     Ok(WmReturn {
         wifi_init: init,
@@ -253,8 +218,6 @@ async fn run_dhcp_server(ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>)
         &mut leaser,
     )
     .await;
-
-    log::warn!("stop dhcp server");
 }
 
 #[embassy_executor::task]
@@ -422,14 +385,13 @@ async fn run_http_server(
     };
 
     embassy_futures::select::select(fut, signals.end_signalled()).await;
-    log::warn!("stop http server");
 }
 
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
     init: EspWifiInitialization,
-    init_return_signal: Rc<Signal<CriticalSectionRawMutex, EspWifiInitialization>>,
+    init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
     bt: BT,
     nvs: &TicKV<'_, NvsFlash, 1024>,
     controller: &mut WifiController<'static>,
@@ -438,55 +400,39 @@ async fn wifi_connection_worker(
     let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    spawner
-        .spawn(run_dhcp_server(ap_stack.clone()))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(run_dhcp_server(ap_stack.clone()))?;
 
-    spawner
-        .spawn(run_http_server(
-            ap_stack.clone(),
-            wm_signals.clone(),
-            settings.wifi_panel,
-        ))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(run_http_server(
+        ap_stack.clone(),
+        wm_signals.clone(),
+        settings.wifi_panel,
+    ))?;
 
-    spawner
-        .spawn(bluetooth::bluetooth_task(
-            init,
-            init_return_signal,
-            bt,
-            generated_ssid,
-            wm_signals.clone(),
-        ))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(bluetooth::bluetooth_task(
+        init,
+        init_return_signal,
+        bt,
+        generated_ssid,
+        wm_signals.clone(),
+    ))?;
 
-    spawner
-        .spawn(ap_task(ap_stack, wm_signals.clone()))
-        .map_err(|_| WmError::TaskSpawnError)?;
+    spawner.spawn(ap_task(ap_stack, wm_signals.clone()))?;
 
     let mut last_scan = Instant::MIN;
     loop {
         if wm_signals.wifi_conn_info_sig.signaled() {
             let setup_info_buf = wm_signals.wifi_conn_info_sig.wait().await;
-            let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf).unwrap();
+            let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf)?;
 
             log::warn!("trying to connect to: {:?}", setup_info);
-            let client_config = Configuration::Client(ClientConfiguration {
-                ssid: String::from_str(&setup_info.ssid).unwrap(),
-                password: String::from_str(&setup_info.psk).unwrap(),
-                ..Default::default()
-            });
-            controller
-                .set_configuration(&client_config)
-                .map_err(|e| WmError::WifiError(e))?;
+            controller.set_configuration(&setup_info.to_client_conf()?)?;
 
             let wifi_connected =
                 utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await;
 
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
-                nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)
-                    .map_err(|e| WmError::FlashError(e))?;
+                nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)?;
 
                 esp_hal_dhcp_server::dhcp_close();
                 wm_signals.signal_end();
@@ -557,5 +503,4 @@ async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
 #[embassy_executor::task]
 async fn ap_task(stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>, signals: Rc<WmInnerSignals>) {
     embassy_futures::select::select(stack.run(), signals.end_signalled()).await;
-    log::warn!("stop ap task");
 }

@@ -9,7 +9,7 @@ use bleps::{
     gatt,
 };
 use embassy_futures::select::Either::{First, Second};
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
 use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
@@ -27,13 +27,13 @@ use crate::structs::WmInnerSignals;
 #[embassy_executor::task]
 pub async fn bluetooth_task(
     init: EspWifiInitialization,
-    init_return_signal: Rc<Signal<CriticalSectionRawMutex, EspWifiInitialization>>,
+    init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
     mut bt: BT,
     name: String<32>,
     signals: Rc<WmInnerSignals>,
 ) {
-    let ble_data = Rc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
-    let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
+    let ble_data = Rc::new(Mutex::<NoopRawMutex, Vec<u8>>::new(Vec::new()));
+    let ble_end_signal = Rc::new(Signal::<NoopRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
     init_return_signal.signal(init); // return the init value
@@ -56,7 +56,7 @@ pub async fn bluetooth_task(
 
         _ = ble.cmd_set_le_advertise_enable(true).await;
 
-        log::info!("started advertising");
+        log::info!("[BLE] started advertising");
         let mut rf = |offset: usize, data: &mut [u8]| {
             if let Ok(wifis) = signals.wifi_scan_res.try_lock() {
                 let range = offset..wifis.len();
@@ -102,7 +102,6 @@ pub async fn bluetooth_task(
             let work = match fut {
                 First(work) => work,
                 Second(_) => {
-                    log::warn!("Stop ble task!");
                     return;
                 }
             };
@@ -114,7 +113,7 @@ pub async fn bluetooth_task(
                     }
                 }
                 Err(e) => {
-                    log::error!("err: {e:?}");
+                    log::error!("[BLE] work err: {e:?}");
                 }
             }
 
@@ -129,7 +128,6 @@ pub async fn bluetooth_task(
 
                 let wifi_connected = signals.wifi_conn_res_sig.wait().await;
                 if wifi_connected {
-                    log::warn!("Stop ble task!");
                     return;
                 }
             }

@@ -1,3 +1,6 @@
+use core::str::FromStr;
+
+use embassy_executor::SpawnError;
 use embassy_net::Stack;
 use embassy_sync::{
     blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
@@ -6,10 +9,13 @@ use embassy_sync::{
     signal::Signal,
 };
 use esp_wifi::{
-    wifi::{WifiDevice, WifiStaDevice},
-    EspWifiInitFor, EspWifiInitialization,
+    wifi::{ClientConfiguration, Configuration, WifiDevice, WifiError, WifiStaDevice},
+    EspWifiInitFor, EspWifiInitialization, InitializationError,
 };
+use heapless::String;
 use serde::Deserialize;
+
+pub type Result<T> = core::result::Result<T, WmError>;
 
 #[derive(Debug)]
 pub enum WmError {
@@ -18,13 +24,48 @@ pub enum WmError {
 
     WifiControllerStartError,
     FlashError(tickv::ErrorCode),
-    WifiError(esp_wifi::wifi::WifiError),
+    WifiError(WifiError),
+    WifiInitalizationError(InitializationError),
     TaskSpawnError,
 
     Other,
 }
 
-pub type Result<T> = core::result::Result<T, WmError>;
+impl From<InitializationError> for WmError {
+    fn from(value: InitializationError) -> Self {
+        Self::WifiInitalizationError(value)
+    }
+}
+
+impl From<WifiError> for WmError {
+    fn from(value: WifiError) -> Self {
+        Self::WifiError(value)
+    }
+}
+
+impl From<SpawnError> for WmError {
+    fn from(_value: SpawnError) -> Self {
+        Self::TaskSpawnError
+    }
+}
+
+impl From<tickv::ErrorCode> for WmError {
+    fn from(value: tickv::ErrorCode) -> Self {
+        Self::FlashError(value)
+    }
+}
+
+impl From<serde_json::error::Error> for WmError {
+    fn from(_value: serde_json::error::Error) -> Self {
+        Self::Other
+    }
+}
+
+impl From<()> for WmError {
+    fn from(_value: ()) -> Self {
+        Self::Other
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct WmSettings {
@@ -44,6 +85,16 @@ pub(crate) struct AutoSetupSettings {
     pub ssid: alloc::string::String,
     pub psk: alloc::string::String,
     pub data: Option<serde_json::Value>,
+}
+
+impl AutoSetupSettings {
+    pub fn to_client_conf(&self) -> Result<Configuration> {
+        Ok(Configuration::Client(ClientConfiguration {
+            ssid: String::from_str(&self.ssid)?,
+            password: String::from_str(&self.psk)?,
+            ..Default::default()
+        }))
+    }
 }
 
 pub struct WmReturn {
