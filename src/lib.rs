@@ -53,8 +53,8 @@ pub async fn init_wm(
         EspWifiInitFor::Ble => return Err(WmError::Other),
     }
 
-    let internal_init_for = InternalInitFor::from_init_for(&init_for);
-    let init = esp_wifi::init(init_for, timer, rng.clone(), radio_clocks).unwrap();
+    let init_for = InternalInitFor::from_init_for(&init_for);
+    let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clocks).unwrap();
     let init_return_signal =
         alloc::rc::Rc::new(Signal::<CriticalSectionRawMutex, EspWifiInitialization>::new());
 
@@ -177,13 +177,7 @@ pub async fn init_wm(
 
         let init = init_return_signal.wait().await;
         let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init).unwrap() };
-        let init = esp_wifi::init(
-            internal_init_for.to_init_for(),
-            timer,
-            rng.clone(),
-            radio_clk,
-        )
-        .unwrap();
+        let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clk).unwrap();
 
         let (sta_interface, mut controller) =
             esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)
@@ -228,11 +222,11 @@ pub async fn init_wm(
             controller,
             //sta_stack,
         ))
-        .map_err(|_| WmError::WifiTaskSpawnError)?;
+        .map_err(|_| WmError::TaskSpawnError)?;
 
     spawner
         .spawn(sta_task(sta_stack))
-        .map_err(|_| WmError::WifiTaskSpawnError)?;
+        .map_err(|_| WmError::TaskSpawnError)?;
 
     Ok(WmReturn {
         wifi_init: init,
@@ -268,7 +262,6 @@ async fn run_http_server(
     ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
-    close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     let fut = async {
         let mut rx_buffer = [0; 4096];
@@ -372,7 +365,7 @@ async fn run_http_server(
                                 let resp_res = signals.wifi_scan_res.try_lock();
                                 let resp = match resp_res {
                                     Ok(ref resp) => resp.as_str(),
-                                    Err(_) => ""
+                                    Err(_) => "",
                                 };
 
                                 let resp_len = alloc::format!("{}", resp.len());
@@ -428,7 +421,7 @@ async fn run_http_server(
         }
     };
 
-    embassy_futures::select::select(fut, close_signal.wait()).await;
+    embassy_futures::select::select(fut, signals.end_signalled()).await;
     log::warn!("stop http server");
 }
 
@@ -442,21 +435,20 @@ async fn wifi_connection_worker(
     controller: &mut WifiController<'static>,
     ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
 ) -> Result<AutoSetupSettings> {
-    let ap_end_sig = Rc::new(Signal::new());
-    let http_server_sig = Rc::new(Signal::new());
-    let ble_end_task_sig = Rc::new(Signal::new());
     let wm_signals = Rc::new(WmInnerSignals::new());
 
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    spawner.spawn(run_dhcp_server(ap_stack.clone())).unwrap();
+    spawner
+        .spawn(run_dhcp_server(ap_stack.clone()))
+        .map_err(|_| WmError::TaskSpawnError)?;
+
     spawner
         .spawn(run_http_server(
             ap_stack.clone(),
             wm_signals.clone(),
             settings.wifi_panel,
-            http_server_sig.clone(),
         ))
-        .unwrap();
+        .map_err(|_| WmError::TaskSpawnError)?;
 
     spawner
         .spawn(bluetooth::bluetooth_task(
@@ -465,13 +457,12 @@ async fn wifi_connection_worker(
             bt,
             generated_ssid,
             wm_signals.clone(),
-            ble_end_task_sig.clone(),
         ))
-        .map_err(|_| WmError::BtTaskSpawnError)?;
+        .map_err(|_| WmError::TaskSpawnError)?;
 
     spawner
-        .spawn(ap_task(ap_stack, ap_end_sig.clone()))
-        .unwrap();
+        .spawn(ap_task(ap_stack, wm_signals.clone()))
+        .map_err(|_| WmError::TaskSpawnError)?;
 
     let mut last_scan = Instant::MIN;
     loop {
@@ -498,9 +489,7 @@ async fn wifi_connection_worker(
                     .map_err(|e| WmError::FlashError(e))?;
 
                 esp_hal_dhcp_server::dhcp_close();
-                ap_end_sig.signal(());
-                http_server_sig.signal(());
-                ble_end_task_sig.signal(());
+                wm_signals.signal_end();
 
                 Timer::after_millis(100).await;
                 return Ok(setup_info);
@@ -566,10 +555,7 @@ async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
 }
 
 #[embassy_executor::task]
-async fn ap_task(
-    stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
-    close_signal: Rc<Signal<CriticalSectionRawMutex, ()>>,
-) {
-    embassy_futures::select::select(stack.run(), close_signal.wait()).await;
+async fn ap_task(stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>, signals: Rc<WmInnerSignals>) {
+    embassy_futures::select::select(stack.run(), signals.end_signalled()).await;
     log::warn!("stop ap task");
 }

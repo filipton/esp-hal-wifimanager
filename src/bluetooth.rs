@@ -31,7 +31,6 @@ pub async fn bluetooth_task(
     mut bt: BT,
     name: String<32>,
     signals: Rc<WmInnerSignals>,
-    ble_task_end_sig: Rc<Signal<CriticalSectionRawMutex, ()>>,
 ) {
     let ble_data = Rc::new(Mutex::<CriticalSectionRawMutex, Vec<u8>>::new(Vec::new()));
     let ble_end_signal = Rc::new(Signal::<CriticalSectionRawMutex, ()>::new());
@@ -99,7 +98,7 @@ pub async fn bluetooth_task(
         let mut rng = bleps::no_rng::NoRng;
         let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
         loop {
-            let fut = embassy_futures::select::select(srv.do_work(), ble_task_end_sig.wait()).await;
+            let fut = embassy_futures::select::select(srv.do_work(), signals.end_signalled()).await;
             let work = match fut {
                 First(work) => work,
                 Second(_) => {

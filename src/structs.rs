@@ -1,7 +1,13 @@
 use embassy_net::Stack;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex, signal::Signal};
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
+    mutex::Mutex,
+    pubsub::PubSubChannel,
+    signal::Signal,
+};
 use esp_wifi::{
-    wifi::{WifiDevice, WifiStaDevice}, EspWifiInitFor, EspWifiInitialization
+    wifi::{WifiDevice, WifiStaDevice},
+    EspWifiInitFor, EspWifiInitialization,
 };
 use serde::Deserialize;
 
@@ -13,8 +19,7 @@ pub enum WmError {
     WifiControllerStartError,
     FlashError(tickv::ErrorCode),
     WifiError(esp_wifi::wifi::WifiError),
-    WifiTaskSpawnError,
-    BtTaskSpawnError,
+    TaskSpawnError,
 
     Other,
 }
@@ -91,6 +96,8 @@ pub struct WmInnerSignals {
 
     /// This is used to tell ble task about conn result
     pub wifi_conn_res_sig: Signal<CriticalSectionRawMutex, bool>,
+
+    end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 10, 1>,
 }
 
 impl WmInnerSignals {
@@ -99,7 +106,24 @@ impl WmInnerSignals {
             wifi_scan_res: Mutex::new(alloc::string::String::new()),
             wifi_conn_info_sig: Signal::new(),
             wifi_conn_res_sig: Signal::new(),
+            end_signal_pubsub: PubSubChannel::new(),
         }
+    }
+
+    /// Wait for end signal
+    pub async fn end_signalled(&self) {
+        self.end_signal_pubsub
+            .subscriber()
+            .expect("Shouldnt fail getting subscriber")
+            .next_message_pure()
+            .await;
+    }
+
+    pub fn signal_end(&self) {
+        self.end_signal_pubsub
+            .publisher()
+            .expect("Should fail getting publisher")
+            .publish_immediate(());
     }
 }
 
@@ -107,7 +131,7 @@ impl WmInnerSignals {
 pub enum InternalInitFor {
     Wifi,
     Ble,
-    WifiBle
+    WifiBle,
 }
 
 impl InternalInitFor {
