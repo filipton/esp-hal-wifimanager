@@ -1,6 +1,54 @@
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use alloc::rc::Rc;
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    mutex::Mutex,
+    semaphore::{GreedySemaphore, Semaphore},
+};
 use embedded_storage::{ReadStorage, Storage};
 use tickv::FlashController;
+
+static mut NVS_READ_BUF: &'static mut [u8; 1024] = &mut [0; 1024];
+
+#[derive(Clone)]
+pub struct Nvs {
+    tickv: Rc<tickv::TicKV<'static, NvsFlash, 1024>>,
+    semaphore: Rc<GreedySemaphore<CriticalSectionRawMutex>>,
+}
+
+impl Nvs {
+    pub fn new(flash_offset: usize, flash_size: usize) -> Self {
+        let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
+            NvsFlash::new(flash_offset),
+            unsafe { NVS_READ_BUF },
+            flash_size,
+        );
+        nvs.initialise(hash(tickv::MAIN_KEY))
+            .expect("Cannot initalise nvs");
+
+        Nvs {
+            tickv: Rc::new(nvs),
+            semaphore: Rc::new(GreedySemaphore::new(1)),
+        }
+    }
+
+    pub async fn get_key(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
+        let _drop = self.semaphore.acquire(1).await.unwrap();
+        self.tickv.get_key(hash(key), buf)?;
+        Ok(())
+    }
+
+    pub async fn append_key(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
+        let _drop = self.semaphore.acquire(1).await.unwrap();
+        self.tickv.append_key(hash(key), buf)?;
+        Ok(())
+    }
+
+    pub async fn invalidate_key(&self, key: &[u8]) -> crate::Result<()> {
+        let _drop = self.semaphore.acquire(1).await.unwrap();
+        self.tickv.invalidate_key(hash(key))?;
+        Ok(())
+    }
+}
 
 pub struct NvsFlash {
     flash_offset: u32,

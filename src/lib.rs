@@ -20,11 +20,10 @@ use esp_wifi::{
     EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
 use httparse::Header;
-use nvs::NvsFlash;
 use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
-use tickv::TicKV;
 extern crate alloc;
 
+pub use nvs::Nvs;
 pub use structs::{WmError, WmSettings};
 pub use utils::{get_efuse_mac, get_efuse_u32};
 
@@ -42,6 +41,7 @@ pub async fn init_wm(
     mut wifi: WIFI,
     bt: BT,
     spawner: &Spawner,
+    nvs: &Nvs,
 ) -> Result<WmReturn> {
     match init_for {
         EspWifiInitFor::Wifi => {}
@@ -71,16 +71,8 @@ pub async fn init_wm(
 
     controller.start().await?;
 
-    let mut read_buf: [u8; 1024] = [0; 1024];
-    let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-        NvsFlash::new(settings.flash_offset),
-        &mut read_buf,
-        settings.flash_size,
-    );
-    nvs.initialise(nvs::hash(tickv::MAIN_KEY))?;
-
     let mut wifi_setup = [0; 1024];
-    let wifi_setup = match nvs.get_key(nvs::hash(b"WIFI_SETUP"), &mut wifi_setup) {
+    let wifi_setup = match nvs.get_key(b"WIFI_SETUP", &mut wifi_setup).await {
         Ok(_) => {
             let end_pos = wifi_setup
                 .iter()
@@ -146,7 +138,7 @@ pub async fn init_wm(
             init,
             init_return_signal.clone(),
             bt,
-            &nvs,
+            nvs.clone(),
             &mut controller,
             ap_stack,
         )
@@ -393,7 +385,7 @@ async fn wifi_connection_worker(
     init: EspWifiInitialization,
     init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
     bt: BT,
-    nvs: &TicKV<'_, NvsFlash, 1024>,
+    nvs: Nvs,
     controller: &mut WifiController<'static>,
     ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
 ) -> Result<AutoSetupSettings> {
@@ -432,7 +424,7 @@ async fn wifi_connection_worker(
 
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
-                nvs.append_key(nvs::hash(b"WIFI_SETUP"), &setup_info_buf)?;
+                nvs.append_key(b"WIFI_SETUP", &setup_info_buf).await?;
 
                 esp_hal_dhcp_server::dhcp_close();
                 wm_signals.signal_end();

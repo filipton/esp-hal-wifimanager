@@ -3,10 +3,7 @@ use core::str::FromStr;
 use embassy_executor::SpawnError;
 use embassy_net::Stack;
 use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
-    mutex::Mutex,
-    pubsub::PubSubChannel,
-    signal::Signal,
+    blocking_mutex::raw::NoopRawMutex, mutex::Mutex, pubsub::PubSubChannel, signal::Signal,
 };
 use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiDevice, WifiError, WifiStaDevice},
@@ -72,8 +69,6 @@ pub struct WmSettings {
     pub ssid_generator: fn(u64) -> heapless::String<32>,
     pub wifi_panel: &'static str,
 
-    pub flash_size: usize,
-    pub flash_offset: usize,
     pub wifi_conn_timeout: u64,
     pub wifi_reconnect_time: u64,
     pub wifi_scan_interval: u64,
@@ -97,6 +92,28 @@ impl AutoSetupSettings {
     }
 }
 
+impl WmSettings {
+    /// Defaults for esp32 (with defaut partition schema)
+    ///
+    /// Checked on esp32s3 and esp32c3
+    pub fn default() -> Self {
+        Self {
+            ssid_generator: |efuse| {
+                let mut generated_name = heapless::String::<32>::new();
+                _ = core::fmt::write(&mut generated_name, format_args!("ESP-{:X}", efuse));
+
+                generated_name
+            },
+            wifi_panel: include_str!("./panel.html"),
+
+            wifi_seed: 69420,
+            wifi_reconnect_time: 1000,
+            wifi_conn_timeout: 15000,
+            wifi_scan_interval: 15000,
+        }
+    }
+}
+
 pub struct WmReturn {
     pub wifi_init: EspWifiInitialization,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
@@ -115,38 +132,14 @@ impl ::core::fmt::Debug for WmReturn {
     }
 }
 
-impl WmSettings {
-    /// Defaults for esp32 (with defaut partition schema)
-    ///
-    /// Checked on esp32s3 and esp32c3
-    pub fn default() -> Self {
-        Self {
-            ssid_generator: |efuse| {
-                let mut generated_name = heapless::String::<32>::new();
-                _ = core::fmt::write(&mut generated_name, format_args!("ESP-{:X}", efuse));
-
-                generated_name
-            },
-            wifi_panel: include_str!("./panel.html"),
-
-            flash_offset: 0x9000,
-            flash_size: 0x6000,
-            wifi_seed: 69420,
-            wifi_reconnect_time: 1000,
-            wifi_conn_timeout: 15000,
-            wifi_scan_interval: 15000,
-        }
-    }
-}
-
 pub struct WmInnerSignals {
-    pub wifi_scan_res: Mutex<CriticalSectionRawMutex, alloc::string::String>,
+    pub wifi_scan_res: Mutex<NoopRawMutex, alloc::string::String>,
 
     /// This is used to tell main task to connect to wifi
-    pub wifi_conn_info_sig: Signal<CriticalSectionRawMutex, alloc::vec::Vec<u8>>,
+    pub wifi_conn_info_sig: Signal<NoopRawMutex, alloc::vec::Vec<u8>>,
 
     /// This is used to tell ble task about conn result
-    pub wifi_conn_res_sig: Signal<CriticalSectionRawMutex, bool>,
+    pub wifi_conn_res_sig: Signal<NoopRawMutex, bool>,
 
     end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 10, 1>,
 }
