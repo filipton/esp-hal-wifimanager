@@ -23,6 +23,7 @@ pub enum WmError {
     FlashError(tickv::ErrorCode),
     WifiError(WifiError),
     WifiInitalizationError(InitializationError),
+    SerdeError(serde_json::Error),
     TaskSpawnError,
 
     Other,
@@ -52,9 +53,9 @@ impl From<tickv::ErrorCode> for WmError {
     }
 }
 
-impl From<serde_json::error::Error> for WmError {
-    fn from(_value: serde_json::error::Error) -> Self {
-        Self::Other
+impl From<serde_json::Error> for WmError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::SerdeError(value)
     }
 }
 
