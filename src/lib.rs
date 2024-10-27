@@ -1,70 +1,74 @@
 #![no_std]
 
+extern crate alloc;
 use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
-use embassy_net::{
-    tcp::TcpSocket, Config, IpListenEndpoint, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
-};
+use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
-use embedded_io_async::Write;
 use esp_hal::peripheral::Peripheral;
 use esp_hal::{
-    peripherals::{BT, RADIO_CLK, WIFI},
+    peripherals::{RADIO_CLK, WIFI},
     rng::Rng,
 };
-use esp_hal_dhcp_server::Ipv4Addr;
 use esp_wifi::{
     wifi::{WifiApDevice, WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
     EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
-use httparse::Header;
 use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
-extern crate alloc;
 
 pub use nvs::Nvs;
 pub use structs::{WmError, WmSettings};
 pub use utils::{get_efuse_mac, get_efuse_u32};
 
+#[cfg(feature = "ap")]
+mod http;
+
+#[cfg(feature = "ble")]
 mod bluetooth;
+
 mod nvs;
 mod structs;
 mod utils;
+
+#[cfg(feature = "ble")]
+const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::WifiBle;
+#[cfg(all(feature = "ap", not(feature = "ble")))]
+const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi;
+
+#[cfg(all(not(feature = "ble"), not(feature = "ap")))]
+const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi; // just to supress error while throwing
+                                                          // compile_error
+
+#[cfg(all(not(feature = "ble"), not(feature = "ap")))]
+compile_error!("Enable at least one feature (\"ble\", \"ap\")!");
 
 pub async fn init_wm(
     init_for: EspWifiInitFor,
     settings: WmSettings,
     timer: impl EspWifiTimerSource,
+    spawner: &Spawner,
+    nvs: &Nvs,
     rng: Rng,
     radio_clocks: RADIO_CLK,
     mut wifi: WIFI,
-    bt: BT,
-    spawner: &Spawner,
-    nvs: &Nvs,
+    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
 ) -> Result<WmReturn> {
+    let init_for = InternalInitFor::from_init_for(&init_for);
     match init_for {
-        EspWifiInitFor::Wifi => {}
-        EspWifiInitFor::WifiBle => {}
-        EspWifiInitFor::Ble => return Err(WmError::Other),
+        InternalInitFor::Wifi => {}
+        InternalInitFor::WifiBle => {
+            #[cfg(not(feature = "ble"))]
+            return Err(WmError::Other);
+        }
+        InternalInitFor::Ble => return Err(WmError::Other), // why would you require only bt? lmao
     }
 
-    let init_for = InternalInitFor::from_init_for(&init_for);
+    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
     let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clocks)?;
     let init_return_signal =
         alloc::rc::Rc::new(Signal::<NoopRawMutex, EspWifiInitialization>::new());
-
-    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    let ap_config = esp_wifi::wifi::AccessPointConfiguration {
-        ssid: generated_ssid,
-        ..Default::default()
-    };
-    let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
-    let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(ap_ip, 24),
-        gateway: Some(ap_ip),
-        dns_servers: Default::default(),
-    });
 
     let (sta_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)?;
@@ -86,12 +90,10 @@ pub async fn init_wm(
         Err(_) => None,
     };
 
-    //let wifi_reconnect_time = settings.wifi_reconnect_time;
     let mut wifi_connected = false;
     if let Some(ref wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
         controller.set_configuration(&wifi_setup.to_client_conf()?)?;
-
         wifi_connected =
             utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
     }
@@ -111,7 +113,18 @@ pub async fn init_wm(
         drop(controller);
 
         let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
-        let init = esp_wifi::init(EspWifiInitFor::WifiBle, timer, rng.clone(), radio_clk)?;
+        let init = esp_wifi::init(WM_INIT_FOR, timer, rng.clone(), radio_clk)?;
+        let ap_config = esp_wifi::wifi::AccessPointConfiguration {
+            ssid: generated_ssid,
+            ..Default::default()
+        };
+        let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
+        let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
+            address: Ipv4Cidr::new(ap_ip, 24),
+            gateway: Some(ap_ip),
+            dns_servers: Default::default(),
+        });
+
         let (ap_interface, sta_interface, mut controller) = esp_wifi::wifi::new_ap_sta_with_config(
             &init,
             unsafe { wifi.clone_unchecked() },
@@ -137,10 +150,11 @@ pub async fn init_wm(
             &spawner,
             init,
             init_return_signal.clone(),
-            bt,
             nvs.clone(),
             &mut controller,
             ap_stack,
+            #[cfg(feature = "ble")]
+            bt,
         )
         .await?;
 
@@ -193,15 +207,17 @@ pub async fn init_wm(
     })
 }
 
+#[cfg(feature = "ap")]
 #[embassy_executor::task]
 async fn run_dhcp_server(ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>) {
-    let mut leaser =
-        esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(Ipv4Addr::new(192, 168, 4, 100));
+    let mut leaser = esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(
+        esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 100),
+    );
 
     esp_hal_dhcp_server::run_dhcp_server(
         ap_stack,
         esp_hal_dhcp_server::structs::DhcpServerConfig {
-            ip: Ipv4Addr::new(192, 168, 4, 1),
+            ip: esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 1),
             lease_time: Duration::from_secs(3600),
             gateways: &[],
             subnet: None,
@@ -212,194 +228,31 @@ async fn run_dhcp_server(ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>)
     .await;
 }
 
-#[embassy_executor::task]
-async fn run_http_server(
-    ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
-    signals: Rc<WmInnerSignals>,
-    wifi_panel_str: &'static str,
-) {
-    let fut = async {
-        let mut rx_buffer = [0; 4096];
-        let mut tx_buffer = [0; 4096];
-
-        let mut socket = TcpSocket::new(&ap_stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
-
-        let mut buf = [0; 2048];
-        loop {
-            if let Err(e) = socket
-                .accept(IpListenEndpoint {
-                    addr: None,
-                    port: 80,
-                })
-                .await
-            {
-                log::error!("socket.accept error: {e:?}");
-            }
-
-            loop {
-                match socket.read(&mut buf).await {
-                    Ok(0) => {
-                        log::warn!("socket.read EOF");
-                        break;
-                    }
-                    Ok(n) => {
-                        let mut headers = [httparse::EMPTY_HEADER; 32];
-                        let mut req = httparse::Request::new(&mut headers);
-
-                        let body_offset = match req.parse(&buf[..n]) {
-                            Ok(res) => {
-                                if res.is_partial() {
-                                    log::error!("request is partial");
-                                    break;
-                                }
-
-                                res.unwrap()
-                            }
-                            Err(e) => {
-                                log::error!("request.parse error: {e:?}");
-                                break;
-                            }
-                        };
-
-                        let (path, method) = (req.path.unwrap_or("/"), req.method.unwrap_or("GET"));
-                        match (path, method) {
-                            ("/", "GET") => {
-                                let resp_len = alloc::format!("{}", wifi_panel_str.len());
-                                let http_resp = utils::construct_http_resp(
-                                    200,
-                                    "OK",
-                                    &[
-                                        Header {
-                                            name: "Content-Type",
-                                            value: b"text/html",
-                                        },
-                                        Header {
-                                            name: "Content-Length",
-                                            value: resp_len.as_bytes(),
-                                        },
-                                    ],
-                                    wifi_panel_str.as_bytes(),
-                                );
-
-                                let res = socket.write_all(&http_resp).await;
-                                if let Err(e) = res {
-                                    log::error!("socket.write_all err: {e:?}");
-                                    break;
-                                }
-
-                                _ = socket.flush().await;
-                            }
-                            ("/setup", "POST") => {
-                                signals
-                                    .wifi_conn_info_sig
-                                    .signal(buf[body_offset..n].to_vec());
-                                let wifi_connected = signals.wifi_conn_res_sig.wait().await;
-                                let resp = alloc::format!("{}", wifi_connected);
-                                let resp_len = alloc::format!("{}", resp.len());
-
-                                let http_resp = utils::construct_http_resp(
-                                    200,
-                                    "OK",
-                                    &[Header {
-                                        name: "Content-Length",
-                                        value: resp_len.as_bytes(),
-                                    }],
-                                    resp.as_bytes(),
-                                );
-
-                                let res = socket.write_all(&http_resp).await;
-                                if let Err(e) = res {
-                                    log::error!("socket.write_all err: {e:?}");
-                                    break;
-                                }
-
-                                _ = socket.flush().await;
-                            }
-                            ("/list", "GET") => {
-                                let resp_res = signals.wifi_scan_res.try_lock();
-                                let resp = match resp_res {
-                                    Ok(ref resp) => resp.as_str(),
-                                    Err(_) => "",
-                                };
-
-                                let resp_len = alloc::format!("{}", resp.len());
-
-                                let http_resp = utils::construct_http_resp(
-                                    200,
-                                    "OK",
-                                    &[Header {
-                                        name: "Content-Length",
-                                        value: resp_len.as_bytes(),
-                                    }],
-                                    resp.as_bytes(),
-                                );
-
-                                let res = socket.write_all(&http_resp).await;
-                                if let Err(e) = res {
-                                    log::error!("socket.write_all err: {e:?}");
-                                    break;
-                                }
-
-                                _ = socket.flush().await;
-                            }
-                            _ => {
-                                log::warn!("NOT FOUND: {req:?}");
-                                let res = socket
-                                    .write_all(&utils::construct_http_resp(
-                                        404,
-                                        "Not Found",
-                                        &[Header {
-                                            name: "Content-Length",
-                                            value: b"0",
-                                        }],
-                                        &[],
-                                    ))
-                                    .await;
-
-                                if let Err(e) = res {
-                                    log::error!("socket.write_all err: {e:?}");
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("socket.read error: {e:?}");
-                        break;
-                    }
-                }
-            }
-
-            _ = socket.close();
-            _ = socket.abort();
-        }
-    };
-
-    embassy_futures::select::select(fut, signals.end_signalled()).await;
-}
-
 async fn wifi_connection_worker(
     settings: WmSettings,
     spawner: &Spawner,
     init: EspWifiInitialization,
     init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
-    bt: BT,
     nvs: Nvs,
     controller: &mut WifiController<'static>,
     ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
+    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
 ) -> Result<AutoSetupSettings> {
     let wm_signals = Rc::new(WmInnerSignals::new());
-
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    spawner.spawn(run_dhcp_server(ap_stack.clone()))?;
 
-    spawner.spawn(run_http_server(
-        ap_stack.clone(),
-        wm_signals.clone(),
-        settings.wifi_panel,
-    ))?;
+    #[cfg(feature = "ap")]
+    {
+        spawner.spawn(run_dhcp_server(ap_stack.clone()))?;
+        spawner.spawn(http::run_http_server(
+            ap_stack.clone(),
+            wm_signals.clone(),
+            settings.wifi_panel,
+        ))?;
+        spawner.spawn(ap_task(ap_stack, wm_signals.clone()))?;
+    }
 
+    #[cfg(feature = "ble")]
     spawner.spawn(bluetooth::bluetooth_task(
         init,
         init_return_signal,
@@ -408,7 +261,8 @@ async fn wifi_connection_worker(
         wm_signals.clone(),
     ))?;
 
-    spawner.spawn(ap_task(ap_stack, wm_signals.clone()))?;
+    #[cfg(not(feature = "ble"))]
+    init_return_signal.signal(init);
 
     let mut last_scan = Instant::MIN;
     loop {
@@ -426,6 +280,7 @@ async fn wifi_connection_worker(
             if wifi_connected {
                 nvs.append_key(b"WIFI_SETUP", &setup_info_buf).await?;
 
+                #[cfg(feature = "ap")]
                 esp_hal_dhcp_server::dhcp_close();
                 wm_signals.signal_end();
 

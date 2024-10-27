@@ -182,16 +182,31 @@ pub enum InternalInitFor {
 impl InternalInitFor {
     pub fn to_init_for(&self) -> EspWifiInitFor {
         match self {
+            #[cfg(feature = "ap")]
             InternalInitFor::Wifi => EspWifiInitFor::Wifi,
+
+            #[cfg(feature = "ble")]
             InternalInitFor::Ble => EspWifiInitFor::Ble,
+
+            #[cfg(feature = "ble")]
             InternalInitFor::WifiBle => EspWifiInitFor::WifiBle,
+
+            #[cfg(not(feature = "ap"))]
+            InternalInitFor::Wifi => panic!("Ap feature not enabled!"),
+
+            #[cfg(not(feature = "ble"))]
+            InternalInitFor::Ble | InternalInitFor::WifiBle => panic!("Ble feature not enabled!"),
         }
     }
 
     pub fn from_init_for(init_for: &EspWifiInitFor) -> Self {
         match init_for {
             EspWifiInitFor::Wifi => Self::Wifi,
+
+            #[cfg(feature = "ble")]
             EspWifiInitFor::Ble => Self::Ble,
+
+            #[cfg(feature = "ble")]
             EspWifiInitFor::WifiBle => Self::WifiBle,
         }
     }

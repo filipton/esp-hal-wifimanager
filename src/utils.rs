@@ -1,30 +1,6 @@
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_wifi::wifi::{WifiController, WifiDevice, WifiStaDevice};
-use httparse::Header;
-
-pub fn construct_http_resp(
-    status_code: u16,
-    status_text: &str,
-    headers: &[Header],
-    body: &[u8],
-) -> alloc::vec::Vec<u8> {
-    let mut buf = alloc::vec::Vec::new();
-    buf.extend_from_slice(alloc::format!("HTTP/1.1 {status_code} {status_text}\r\n").as_bytes());
-    for header in headers {
-        buf.extend_from_slice(
-            alloc::format!(
-                "{}: {}\r\n",
-                header.name,
-                core::str::from_utf8(header.value).unwrap()
-            )
-            .as_bytes(),
-        );
-    }
-    buf.extend_from_slice(b"\r\n");
-    buf.extend_from_slice(body);
-    buf
-}
 
 pub async fn try_to_wifi_connect(
     controller: &mut WifiController<'static>,

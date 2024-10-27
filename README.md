@@ -4,6 +4,14 @@ Easy to use Wifimanager for esp-hal (no-std).
 If it can't connect to wifi it spawns BLE server (You can use chrome on android or windows to configure it)
 and open wifi accesspoint with DHCP server.
 
+## Features (crate)
+- `ap` feature that will spawn ap to connect to
+- `ble` feature that will spawn ble server to connect to
+- `esp32c3`/`esp32s3` feature to select platform
+
+If neither `ap` nor `ble` feature is selected, crate will fail to compile.
+Obviously you need to select your platform (`esp32s3` / `esp32c3`)
+
 ## Simple example
 Add this to your Cargo.toml (note also add `embassy`, its only for async):
 ```toml
@@ -33,3 +41,8 @@ let wifi_res = esp_hal_wifimanager::init_wm(
 )
 .await;
 ```
+
+## TODO:
+- [ ] Working `ap` feature (disabling it)
+- [ ] Big cleanup
+- [ ] Configurable AP panel files (also allow multiple files)
