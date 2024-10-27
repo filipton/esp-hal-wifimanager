@@ -154,6 +154,7 @@ impl WmInnerSignals {
     }
 
     /// Wait for end signal
+    #[allow(dead_code)]
     pub async fn end_signalled(&self) {
         self.end_signal_pubsub
             .subscriber()

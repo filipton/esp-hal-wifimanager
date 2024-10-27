@@ -34,3 +34,4 @@ esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-s
 esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3"]
 ap = ["dep:esp-hal-dhcp-server", "dep:httparse"]
 ble = ["dep:bleps", "esp-wifi/ble", "esp-wifi/coex"]
+env = []

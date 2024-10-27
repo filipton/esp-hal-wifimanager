@@ -39,8 +39,8 @@ mod utils;
 const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::WifiBle;
 #[cfg(not(feature = "ble"))]
 const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi;
-#[cfg(all(not(feature = "ble"), not(feature = "ap")))]
-compile_error!("Enable at least one feature (\"ble\", \"ap\")!");
+#[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
+compile_error!("Enable at least one feature (\"ble\", \"ap\", \"env\")!");
 
 pub async fn init_wm(
     init_for: EspWifiInitFor,
@@ -124,6 +124,11 @@ pub async fn init_wm(
             settings.clone(),
         )
         .await?;
+
+        #[cfg(feature = "env")]
+        wm_signals
+            .wifi_conn_info_sig
+            .signal(env!("WM_CONN").as_bytes().to_vec());
 
         #[cfg(feature = "ble")]
         spawner.spawn(bluetooth::bluetooth_task(

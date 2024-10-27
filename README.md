@@ -7,10 +7,19 @@ and open wifi accesspoint with DHCP server.
 ## Features (crate)
 - `ap` feature that will spawn ap to connect to
 - `ble` feature that will spawn ble server to connect to
+- `env` feature that will automatically setup wifi from env vars (for quick and easy testing)
 - `esp32c3`/`esp32s3` feature to select platform
 
-If neither `ap` nor `ble` feature is selected, crate will fail to compile.
+If neither `ap`, `ble` nor `env` feature is selected, crate will fail to compile.
 Obviously you need to select your platform (`esp32s3` / `esp32c3`)
+
+### How to use env feature
+Env feature will automatically setup wifi after startup, to use it:
+- Set [env] WM_CONN inside `.cargo/config.toml` file
+- Start `cargo run` with WM_CONN env var like this:
+```bash
+cargo run --config "env.WM_CONN='{\"ssid\": \"ssid\", \"psk\": \"pass\", \"data\": {}}'"
+```
 
 ## Simple example
 Add this to your Cargo.toml (note also add `embassy`, its only for async):
