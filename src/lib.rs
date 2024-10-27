@@ -4,7 +4,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
-use embassy_net::{Config, Ipv4Cidr, Stack, StackResources, StaticConfigV4};
+use embassy_net::{Config, Stack, StackResources};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::peripheral::Peripheral;
@@ -13,7 +13,7 @@ use esp_hal::{
     rng::Rng,
 };
 use esp_wifi::{
-    wifi::{WifiApDevice, WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
+    wifi::{WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
     EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
 };
 use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
@@ -25,6 +25,9 @@ pub use utils::{get_efuse_mac, get_efuse_u32};
 #[cfg(feature = "ap")]
 mod http;
 
+#[cfg(feature = "ap")]
+mod ap;
+
 #[cfg(feature = "ble")]
 mod bluetooth;
 
@@ -34,13 +37,8 @@ mod utils;
 
 #[cfg(feature = "ble")]
 const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::WifiBle;
-#[cfg(all(feature = "ap", not(feature = "ble")))]
+#[cfg(not(feature = "ble"))]
 const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi;
-
-#[cfg(all(not(feature = "ble"), not(feature = "ap")))]
-const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi; // just to supress error while throwing
-                                                          // compile_error
-
 #[cfg(all(not(feature = "ble"), not(feature = "ap")))]
 compile_error!("Enable at least one feature (\"ble\", \"ap\")!");
 
@@ -50,7 +48,7 @@ pub async fn init_wm(
     timer: impl EspWifiTimerSource,
     spawner: &Spawner,
     nvs: &Nvs,
-    rng: Rng,
+    mut rng: Rng,
     radio_clocks: RADIO_CLK,
     mut wifi: WIFI,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
@@ -112,51 +110,37 @@ pub async fn init_wm(
         drop(sta_interface);
         drop(controller);
 
+        let wm_signals = Rc::new(WmInnerSignals::new());
         let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
         let init = esp_wifi::init(WM_INIT_FOR, timer, rng.clone(), radio_clk)?;
-        let ap_config = esp_wifi::wifi::AccessPointConfiguration {
-            ssid: generated_ssid,
-            ..Default::default()
-        };
-        let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
-        let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
-            address: Ipv4Cidr::new(ap_ip, 24),
-            gateway: Some(ap_ip),
-            dns_servers: Default::default(),
-        });
 
-        let (ap_interface, sta_interface, mut controller) = esp_wifi::wifi::new_ap_sta_with_config(
+        let (sta_interface, mut controller) = utils::spawn_controller(
+            generated_ssid.clone(),
             &init,
             unsafe { wifi.clone_unchecked() },
-            Default::default(),
-            ap_config,
-        )?;
-
-        controller.start().await?;
-
-        let ap_stack = Rc::new(Stack::new(
-            ap_interface,
-            ap_ip_config,
-            {
-                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                    static_cell::StaticCell::new();
-                STATIC_CELL.uninit().write(StackResources::<3>::new())
-            },
-            settings.wifi_seed,
-        ));
-
-        let wifi_setup = wifi_connection_worker(
-            settings.clone(),
+            &mut rng,
             &spawner,
-            init,
-            init_return_signal.clone(),
-            nvs.clone(),
-            &mut controller,
-            ap_stack,
-            #[cfg(feature = "ble")]
-            bt,
+            wm_signals.clone(),
+            settings.clone(),
         )
         .await?;
+
+        #[cfg(feature = "ble")]
+        spawner.spawn(bluetooth::bluetooth_task(
+            init,
+            init_return_signal.clone(),
+            bt,
+            generated_ssid,
+            wm_signals.clone(),
+        ))?;
+
+        #[cfg(not(feature = "ble"))]
+        init_return_signal.signal(init);
+
+        controller.start().await?;
+        let wifi_setup =
+            wifi_connection_worker(settings.clone(), wm_signals, nvs.clone(), &mut controller)
+                .await?;
 
         _ = controller.stop().await;
         drop(sta_interface);
@@ -187,16 +171,11 @@ pub async fn init_wm(
                     static_cell::StaticCell::new();
                 STATIC_CELL.uninit().write(StackResources::<3>::new())
             },
-            settings.wifi_seed,
+            rng.random() as u64,
         ))
     };
 
-    spawner.spawn(connection(
-        settings.wifi_reconnect_time,
-        controller,
-        //sta_stack,
-    ))?;
-
+    spawner.spawn(connection(settings.wifi_reconnect_time, controller))?;
     spawner.spawn(sta_task(sta_stack))?;
 
     Ok(WmReturn {
@@ -207,63 +186,12 @@ pub async fn init_wm(
     })
 }
 
-#[cfg(feature = "ap")]
-#[embassy_executor::task]
-async fn run_dhcp_server(ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>) {
-    let mut leaser = esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(
-        esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 100),
-    );
-
-    esp_hal_dhcp_server::run_dhcp_server(
-        ap_stack,
-        esp_hal_dhcp_server::structs::DhcpServerConfig {
-            ip: esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 1),
-            lease_time: Duration::from_secs(3600),
-            gateways: &[],
-            subnet: None,
-            dns: &[],
-        },
-        &mut leaser,
-    )
-    .await;
-}
-
 async fn wifi_connection_worker(
     settings: WmSettings,
-    spawner: &Spawner,
-    init: EspWifiInitialization,
-    init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
+    wm_signals: Rc<WmInnerSignals>,
     nvs: Nvs,
     controller: &mut WifiController<'static>,
-    ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
-    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
 ) -> Result<AutoSetupSettings> {
-    let wm_signals = Rc::new(WmInnerSignals::new());
-    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-
-    #[cfg(feature = "ap")]
-    {
-        spawner.spawn(run_dhcp_server(ap_stack.clone()))?;
-        spawner.spawn(http::run_http_server(
-            ap_stack.clone(),
-            wm_signals.clone(),
-            settings.wifi_panel,
-        ))?;
-        spawner.spawn(ap_task(ap_stack, wm_signals.clone()))?;
-    }
-
-    #[cfg(feature = "ble")]
-    spawner.spawn(bluetooth::bluetooth_task(
-        init,
-        init_return_signal,
-        bt,
-        generated_ssid,
-        wm_signals.clone(),
-    ))?;
-
-    #[cfg(not(feature = "ble"))]
-    init_return_signal.signal(init);
-
     let mut last_scan = Instant::MIN;
     loop {
         if wm_signals.wifi_conn_info_sig.signaled() {
@@ -282,6 +210,7 @@ async fn wifi_connection_worker(
 
                 #[cfg(feature = "ap")]
                 esp_hal_dhcp_server::dhcp_close();
+
                 wm_signals.signal_end();
 
                 Timer::after_millis(100).await;
@@ -345,9 +274,4 @@ async fn connection(
 #[embassy_executor::task]
 async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
-}
-
-#[embassy_executor::task]
-async fn ap_task(stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>, signals: Rc<WmInnerSignals>) {
-    embassy_futures::select::select(stack.run(), signals.end_signalled()).await;
 }

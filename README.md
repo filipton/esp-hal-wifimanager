@@ -32,17 +32,17 @@ let wifi_res = esp_hal_wifimanager::init_wm(
     esp_wifi::EspWifiInitFor::WifiBle,
     wm_settings,
     timg0.timer0,
+    &spawner,
+    &nvs,
     rng.clone(),
     peripherals.RADIO_CLK,
     peripherals.WIFI,
     peripherals.BT,
-    &spawner,
-    &nvs,
 )
 .await;
 ```
 
 ## TODO:
-- [ ] Working `ap` feature (disabling it)
+- [x] Working `ap` feature (disabling it)
 - [ ] Big cleanup
 - [ ] Configurable AP panel files (also allow multiple files)

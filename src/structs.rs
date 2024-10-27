@@ -73,7 +73,6 @@ pub struct WmSettings {
     pub wifi_conn_timeout: u64,
     pub wifi_reconnect_time: u64,
     pub wifi_scan_interval: u64,
-    pub wifi_seed: u64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -107,7 +106,6 @@ impl WmSettings {
             },
             wifi_panel: include_str!("./panel.html"),
 
-            wifi_seed: 69420,
             wifi_reconnect_time: 1000,
             wifi_conn_timeout: 15000,
             wifi_scan_interval: 15000,
@@ -173,6 +171,7 @@ impl WmInnerSignals {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub enum InternalInitFor {
     Wifi,
     Ble,
@@ -182,7 +181,6 @@ pub enum InternalInitFor {
 impl InternalInitFor {
     pub fn to_init_for(&self) -> EspWifiInitFor {
         match self {
-            #[cfg(feature = "ap")]
             InternalInitFor::Wifi => EspWifiInitFor::Wifi,
 
             #[cfg(feature = "ble")]
@@ -190,9 +188,6 @@ impl InternalInitFor {
 
             #[cfg(feature = "ble")]
             InternalInitFor::WifiBle => EspWifiInitFor::WifiBle,
-
-            #[cfg(not(feature = "ap"))]
-            InternalInitFor::Wifi => panic!("Ap feature not enabled!"),
 
             #[cfg(not(feature = "ble"))]
             InternalInitFor::Ble | InternalInitFor::WifiBle => panic!("Ble feature not enabled!"),

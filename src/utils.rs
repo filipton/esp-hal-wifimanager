@@ -1,6 +1,78 @@
+use crate::{structs::WmInnerSignals, Result, WmSettings};
+use alloc::rc::Rc;
+use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_wifi::wifi::{WifiController, WifiDevice, WifiStaDevice};
+use esp_wifi::{
+    wifi::{WifiController, WifiDevice, WifiStaDevice},
+    EspWifiInitialization,
+};
+use heapless::String;
+
+#[cfg(feature = "ap")]
+use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
+
+#[cfg(feature = "ap")]
+pub async fn spawn_controller(
+    generated_ssid: String<32>,
+    init: &EspWifiInitialization,
+    wifi: esp_hal::peripherals::WIFI,
+    rng: &mut esp_hal::rng::Rng,
+    spawner: &Spawner,
+    wm_signals: Rc<WmInnerSignals>,
+    settings: WmSettings,
+) -> Result<(WifiDevice<'static, WifiStaDevice>, WifiController<'static>)> {
+    let ap_config = esp_wifi::wifi::AccessPointConfiguration {
+        ssid: generated_ssid,
+        ..Default::default()
+    };
+    let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
+    let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(ap_ip, 24),
+        gateway: Some(ap_ip),
+        dns_servers: Default::default(),
+    });
+
+    let (ap_interface, sta_interface, controller) =
+        esp_wifi::wifi::new_ap_sta_with_config(init, wifi, Default::default(), ap_config)?;
+
+    let ap_stack = Rc::new(Stack::new(
+        ap_interface,
+        ap_ip_config,
+        {
+            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write(StackResources::<3>::new())
+        },
+        rng.random() as u64,
+    ));
+
+    spawner.spawn(crate::ap::run_dhcp_server(ap_stack.clone()))?;
+    spawner.spawn(crate::http::run_http_server(
+        ap_stack.clone(),
+        wm_signals.clone(),
+        settings.wifi_panel,
+    ))?;
+    spawner.spawn(crate::ap::ap_task(ap_stack, wm_signals.clone()))?;
+
+    Ok((sta_interface, controller))
+}
+
+#[cfg(not(feature = "ap"))]
+pub async fn spawn_controller(
+    _generated_ssid: String<32>,
+    init: &EspWifiInitialization,
+    wifi: esp_hal::peripherals::WIFI,
+    _rng: &mut esp_hal::rng::Rng,
+    _spawner: &Spawner,
+    _wm_signals: Rc<WmInnerSignals>,
+    _settings: WmSettings,
+) -> Result<(WifiDevice<'static, WifiStaDevice>, WifiController<'static>)> {
+    let (sta_interface, controller) =
+        esp_wifi::wifi::new_with_config(init, wifi, Default::default())?;
+
+    Ok((sta_interface, controller))
+}
 
 pub async fn try_to_wifi_connect(
     controller: &mut WifiController<'static>,
