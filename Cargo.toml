@@ -9,26 +9,28 @@ edition = "2021"
 esp-hal = { version = "0.21.1", default-features = false, features = [] }
 esp-hal-embassy = { version = "0.4.0", default-features = false, features = [] }
 embassy-net = { version = "0.4.0", default-features = false, features = ["tcp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
-esp-wifi = { version = "0.10.1", default-features = false, features = [ "wifi", "ble", "coex", "embassy-net" ] }
-bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"] }
+esp-wifi = { version = "0.10.1", default-features = false, features = [ "wifi", "embassy-net" ] }
+bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", features = [ "macros", "async"], optional = true }
 static_cell = { version = "2.1.0" }
 log = "0.4.22"
 embassy-time = { version = "0.3.2", default-features = false }
-embassy-executor = { version = "0.6.0", default-features = false }
+embassy-executor = { version = "0.6.1", default-features = false }
 heapless = { version = "0.8.0", default-features = false }
 embassy-sync = { version = "0.6.0", default-features = false }
 esp-storage = { version = "0.3.1", default-features = false, features = ["storage", "critical-section"] }
 embedded-storage = "0.3.1"
 tickv = "1.0.0"
-esp-hal-dhcp-server = { version = "0.1.2", features = ["alloc"] }
+esp-hal-dhcp-server = { version = "0.1.2", features = ["alloc"], optional = true }
 embassy-futures = "0.1.1"
-serde = { version = "1.0.210", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1.0.131", default-features = false, features = ["alloc"] }
-httparse = { version = "1.9.5", default-features = false }
+serde = { version = "1.0.213", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1.0.132", default-features = false, features = ["alloc"] }
+httparse = { version = "1.9.5", default-features = false, optional = true }
 embedded-io-async = "0.6.1"
 
 [features]
 #default = []
-default = ["esp32s3"]
+default = ["esp32s3", "ap", "ble"]
 esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-storage/esp32s3"]
 esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3"]
+ap = ["dep:esp-hal-dhcp-server", "dep:httparse"]
+ble = ["dep:bleps", "esp-wifi/ble", "esp-wifi/coex"]

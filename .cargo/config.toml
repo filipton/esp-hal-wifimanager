@@ -1,6 +1,6 @@
 [alias]
-esp32c3 = "build --no-default-features --features=esp32c3 --target=riscv32imc-unknown-none-elf"
-esp32s3 = "build --no-default-features --features=esp32s3 --target=xtensa-esp32s3-none-elf"
+esp32c3 = "build --no-default-features --features=esp32c3,ble,ap --target=riscv32imc-unknown-none-elf"
+esp32s3 = "build --no-default-features --features=esp32s3,ble,ap --target=xtensa-esp32s3-none-elf"
 
 # default target for esp32s3
 target = "xtensa-esp32s3-none-elf"
