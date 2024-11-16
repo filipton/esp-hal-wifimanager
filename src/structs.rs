@@ -1,10 +1,12 @@
 use core::str::FromStr;
 
-use embassy_executor::SpawnError;
-use embassy_net::Stack;
+use embassy_executor::{SpawnError, Spawner};
+use embassy_net::{Config, Stack, StackResources};
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex, mutex::Mutex, pubsub::PubSubChannel, signal::Signal,
 };
+use esp_hal::peripheral::Peripheral;
+use esp_hal::timer::{AnyTimer, PeriodicTimer};
 use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiDevice, WifiError, WifiStaDevice},
     EspWifiInitFor, EspWifiInitialization, InitializationError,
@@ -113,14 +115,81 @@ impl WmSettings {
     }
 }
 
+pub struct DeinitedData {
+    pub timer: PeriodicTimer<'static, AnyTimer>,
+    pub radio: esp_hal::peripherals::RADIO_CLK,
+}
+
 pub struct WmReturn {
     pub wifi_init: EspWifiInitialization,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
 
-    pub start_stop_sig: alloc::rc::Rc<Signal<NoopRawMutex, bool>>,
-    pub res_sig: alloc::rc::Rc<Signal<NoopRawMutex, ()>>,
+    pub(crate) stop_controller_sig: alloc::rc::Rc<Signal<NoopRawMutex, ()>>,
+    pub(crate) stop_stack_sig: alloc::rc::Rc<Signal<NoopRawMutex, ()>>,
+    pub(crate) auto_setup_settings: AutoSetupSettings,
+    pub(crate) wifi: esp_hal::peripherals::WIFI,
+}
+
+impl WmReturn {
+    pub async fn stop_wifi(
+        wm_return: &WmReturn,
+        init: EspWifiInitialization,
+    ) -> Result<DeinitedData> {
+        wm_return.stop_controller_sig.signal(());
+        wm_return.stop_stack_sig.signal(());
+        let (timer, radio) = unsafe { esp_wifi::deinit_unchecked(init)? };
+
+        Ok(DeinitedData { timer, radio })
+    }
+
+    pub async fn start_wifi(
+        wm_return: &mut WmReturn,
+        deinited: DeinitedData,
+        init_for: EspWifiInitFor,
+        mut rng: esp_hal::rng::Rng,
+        spawner: &Spawner,
+    ) -> Result<EspWifiInitialization> {
+        let init = esp_wifi::init(init_for, deinited.timer, rng, deinited.radio)?;
+        let (sta_interface, mut controller) = esp_wifi::wifi::new_with_mode(
+            &init,
+            unsafe { wm_return.wifi.clone_unchecked() },
+            WifiStaDevice,
+        )?;
+
+        controller.start().await?;
+        controller.set_configuration(&wm_return.auto_setup_settings.to_client_conf()?)?;
+
+        let sta_config = Config::dhcpv4(Default::default());
+        let sta_stack = &*{
+            static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
+                static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write(Stack::new(
+                sta_interface,
+                sta_config,
+                {
+                    static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                        static_cell::StaticCell::new();
+                    STATIC_CELL.uninit().write(StackResources::<3>::new())
+                },
+                rng.random() as u64,
+            ))
+        };
+        wm_return.sta_stack = sta_stack;
+
+        spawner.spawn(crate::connection(
+            15000,
+            controller,
+            wm_return.stop_controller_sig.clone(),
+        ))?;
+        spawner.spawn(crate::sta_task(
+            wm_return.sta_stack,
+            wm_return.stop_stack_sig.clone(),
+        ))?;
+
+        Ok(init)
+    }
 }
 
 impl ::core::fmt::Debug for WmReturn {

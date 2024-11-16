@@ -96,11 +96,9 @@ pub async fn init_wm(
             utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
     }
 
-    let (data, init, sta_interface, controller) = if wifi_connected {
+    let (setup, init, sta_interface, controller) = if wifi_connected {
         (
-            wifi_setup
-                .expect("Shouldnt fail if connected i guesss.")
-                .data,
+            wifi_setup.expect("Shouldnt fail if connected i guesss."),
             init,
             sta_interface,
             controller,
@@ -156,12 +154,12 @@ pub async fn init_wm(
         let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clk)?;
 
         let (sta_interface, mut controller) =
-            esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)?;
+            esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)?;
 
         controller.start().await?;
         controller.set_configuration(&wifi_setup.to_client_conf()?)?;
 
-        (wifi_setup.data, init, sta_interface, controller)
+        (wifi_setup, init, sta_interface, controller)
     };
 
     let sta_config = Config::dhcpv4(Default::default());
@@ -180,23 +178,25 @@ pub async fn init_wm(
         ))
     };
 
-    let start_stop_sig = Rc::new(Signal::new());
-    let res_sig = Rc::new(Signal::new());
+    let stop_controller_sig = Rc::new(Signal::new());
+    let stop_stack_sig = Rc::new(Signal::new());
     spawner.spawn(connection(
         settings.wifi_reconnect_time,
         controller,
-        start_stop_sig.clone(),
-        res_sig.clone(),
+        stop_controller_sig.clone(),
     ))?;
-    spawner.spawn(sta_task(sta_stack))?;
+    spawner.spawn(sta_task(sta_stack, stop_stack_sig.clone()))?;
 
     Ok(WmReturn {
         wifi_init: init,
         sta_stack,
-        data,
+        data: setup.data.clone(),
         ip_address: utils::wifi_wait_for_ip(&sta_stack).await,
-        start_stop_sig,
-        res_sig
+
+        stop_controller_sig,
+        stop_stack_sig,
+        auto_setup_settings: setup,
+        wifi
     })
 }
 
@@ -256,11 +256,10 @@ async fn wifi_connection_worker(
 }
 
 #[embassy_executor::task]
-async fn connection(
+pub(crate) async fn connection(
     wifi_reconnect_time: u64,
     mut controller: WifiController<'static>,
-    start_stop_sig: Rc<Signal<NoopRawMutex, bool>>,
-    res_sig: Rc<Signal<NoopRawMutex, ()>>,
+    stop_sig: Rc<Signal<NoopRawMutex, ()>>,
     //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
     log::info!(
@@ -268,49 +267,33 @@ async fn connection(
         controller.get_capabilities()
     );
 
-    loop {
-        let fut = async {
-            loop {
-                if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
-                    // wait until we're no longer connected
-                    controller.wait_for_event(WifiEvent::StaDisconnected).await;
+    let fut = async {
+        loop {
+            if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
+                // wait until we're no longer connected
+                controller.wait_for_event(WifiEvent::StaDisconnected).await;
+                Timer::after(Duration::from_millis(wifi_reconnect_time)).await
+            }
+
+            match controller.connect().await {
+                Ok(_) => {
+                    log::info!("Wifi connected!");
+                }
+                Err(e) => {
+                    log::info!("Failed to connect to wifi: {e:?}");
                     Timer::after(Duration::from_millis(wifi_reconnect_time)).await
                 }
-
-                match controller.connect().await {
-                    Ok(_) => {
-                        log::info!("Wifi connected!");
-                    }
-                    Err(e) => {
-                        log::info!("Failed to connect to wifi: {e:?}");
-                        Timer::after(Duration::from_millis(wifi_reconnect_time)).await
-                    }
-                }
-            }
-        };
-
-        let res = embassy_futures::select::select(fut, start_stop_sig.wait()).await;
-        match res {
-            embassy_futures::select::Either::First(_) => {}
-            embassy_futures::select::Either::Second(state) => {
-                log::error!("WIFI SIG!");
-                if state {
-                    _ = controller.start().await;
-                } else {
-                    _ = controller.disconnect().await;
-                    _ = controller.stop().await;
-                }
-
-                log::error!("WIFI BEF TIMEOUT!");
-                res_sig.signal(());
-                Timer::after_millis(1000).await;
-                log::error!("WIFI AFTER TIMEOUT!");
             }
         }
-    }
+    };
+
+    embassy_futures::select::select(fut, stop_sig.wait()).await;
 }
 
 #[embassy_executor::task]
-async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    stack.run().await
+pub(crate) async fn sta_task(
+    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    stop_sig: Rc<Signal<NoopRawMutex, ()>>,
+) {
+    embassy_futures::select::select(stack.run(), stop_sig.wait()).await;
 }
