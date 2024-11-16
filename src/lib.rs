@@ -188,7 +188,7 @@ pub async fn init_wm(
     spawner.spawn(sta_task(sta_stack, stop_stack_sig.clone()))?;
 
     Ok(WmReturn {
-        wifi_init: init,
+        wifi_init: Some(init),
         sta_stack,
         data: setup.data.clone(),
         ip_address: utils::wifi_wait_for_ip(&sta_stack).await,
@@ -262,6 +262,10 @@ pub(crate) async fn connection(
     stop_sig: Rc<Signal<NoopRawMutex, ()>>,
     //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
+    if !controller.is_started().unwrap_or(false) {
+        _ = controller.start().await;
+    }
+
     log::info!(
         "WIFI Device capabilities: {:?}",
         controller.get_capabilities()

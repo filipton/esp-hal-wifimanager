@@ -121,7 +121,7 @@ pub struct DeinitedData {
 }
 
 pub struct WmReturn {
-    pub wifi_init: EspWifiInitialization,
+    pub wifi_init: Option<EspWifiInitialization>,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
@@ -133,33 +133,30 @@ pub struct WmReturn {
 }
 
 impl WmReturn {
-    pub async fn stop_wifi(
-        wm_return: &WmReturn,
-        init: EspWifiInitialization,
-    ) -> Result<DeinitedData> {
-        wm_return.stop_controller_sig.signal(());
-        wm_return.stop_stack_sig.signal(());
-        let (timer, radio) = unsafe { esp_wifi::deinit_unchecked(init)? };
+    pub async fn stop_wifi(&mut self) -> Result<DeinitedData> {
+        self.stop_controller_sig.signal(());
+        self.stop_stack_sig.signal(());
+        let (timer, radio) =
+            unsafe { esp_wifi::deinit_unchecked(self.wifi_init.take().expect("TODO: error"))? };
 
         Ok(DeinitedData { timer, radio })
     }
 
     pub async fn start_wifi(
-        wm_return: &mut WmReturn,
+        &mut self,
         deinited: DeinitedData,
         init_for: EspWifiInitFor,
         mut rng: esp_hal::rng::Rng,
         spawner: &Spawner,
-    ) -> Result<EspWifiInitialization> {
+    ) -> Result<()> {
         let init = esp_wifi::init(init_for, deinited.timer, rng, deinited.radio)?;
         let (sta_interface, mut controller) = esp_wifi::wifi::new_with_mode(
             &init,
-            unsafe { wm_return.wifi.clone_unchecked() },
+            unsafe { self.wifi.clone_unchecked() },
             WifiStaDevice,
         )?;
 
-        controller.start().await?;
-        controller.set_configuration(&wm_return.auto_setup_settings.to_client_conf()?)?;
+        controller.set_configuration(&self.auto_setup_settings.to_client_conf()?)?;
 
         let sta_config = Config::dhcpv4(Default::default());
         let sta_stack = &*{
@@ -176,19 +173,16 @@ impl WmReturn {
                 rng.random() as u64,
             ))
         };
-        wm_return.sta_stack = sta_stack;
+        self.sta_stack = sta_stack;
+        self.wifi_init = Some(init);
 
         spawner.spawn(crate::connection(
             15000,
             controller,
-            wm_return.stop_controller_sig.clone(),
+            self.stop_controller_sig.clone(),
         ))?;
-        spawner.spawn(crate::sta_task(
-            wm_return.sta_stack,
-            wm_return.stop_stack_sig.clone(),
-        ))?;
-
-        Ok(init)
+        spawner.spawn(crate::sta_task(self.sta_stack, self.stop_stack_sig.clone()))?;
+        Ok(())
     }
 }
 
