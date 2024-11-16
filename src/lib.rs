@@ -35,6 +35,8 @@ mod nvs;
 mod structs;
 mod utils;
 
+pub const WIFI_NVS_KEY: &'static [u8] = b"WIFI_SETUP";
+
 #[cfg(feature = "ble")]
 const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::WifiBle;
 #[cfg(not(feature = "ble"))]
@@ -74,7 +76,7 @@ pub async fn init_wm(
     controller.start().await?;
 
     let mut wifi_setup = [0; 1024];
-    let wifi_setup = match nvs.get_key(b"WIFI_SETUP", &mut wifi_setup).await {
+    let wifi_setup = match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
         Ok(_) => {
             let end_pos = wifi_setup
                 .iter()
@@ -144,8 +146,7 @@ pub async fn init_wm(
 
         controller.start().await?;
         let wifi_setup =
-            wifi_connection_worker(settings.clone(), wm_signals, nvs.clone(), &mut controller)
-                .await?;
+            wifi_connection_worker(settings.clone(), wm_signals, nvs, &mut controller).await?;
 
         _ = controller.stop().await;
         drop(sta_interface);
@@ -194,7 +195,7 @@ pub async fn init_wm(
 async fn wifi_connection_worker(
     settings: WmSettings,
     wm_signals: Rc<WmInnerSignals>,
-    nvs: Nvs,
+    nvs: &Nvs,
     controller: &mut WifiController<'static>,
 ) -> Result<AutoSetupSettings> {
     let mut last_scan = Instant::MIN;
@@ -211,7 +212,7 @@ async fn wifi_connection_worker(
 
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
             if wifi_connected {
-                nvs.append_key(b"WIFI_SETUP", &setup_info_buf).await?;
+                nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
 
                 #[cfg(feature = "ap")]
                 esp_hal_dhcp_server::dhcp_close();
