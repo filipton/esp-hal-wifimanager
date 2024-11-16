@@ -118,6 +118,9 @@ pub struct WmReturn {
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
+
+    pub start_stop_sig: alloc::rc::Rc<Signal<NoopRawMutex, bool>>,
+    pub res_sig: alloc::rc::Rc<Signal<NoopRawMutex, ()>>,
 }
 
 impl ::core::fmt::Debug for WmReturn {
