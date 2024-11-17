@@ -2,6 +2,10 @@
 name = "esp-hal-wifimanager"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "Wifi Manager for esp-hal (bt+wifi ap)"
+repository = "https://github.com/filipton/esp-hal-wifimanager"
+
 
 [lib]
 
