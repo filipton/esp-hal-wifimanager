@@ -37,6 +37,9 @@
     </form>
 
     <script>
+        let connecting = false;
+        let listInterval;
+
         const panel = document.querySelector("#panel");
         panel.addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -47,11 +50,18 @@
             });
 
             try {
+                connecting = true;
                 let res = await fetch("/setup", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
                     body: json
                 });
+                connecting = false;
+
+                if(listInterval) {
+                    clearInterval(listInterval);
+                }
+                alert("Connect state: " + await res.text());
             } catch (e) {
                 alert(`Fetch err: ${e}`);
             }
@@ -62,6 +72,8 @@
         }
 
         async function getApList() {
+            if (connecting) return;
+
             try {
                 let res = await fetch("/list");
                 let text = await res.text();
@@ -86,7 +98,7 @@
             }
         }
 
-        setInterval(getApList, 15000);
+        listInverval = setInterval(getApList, 15000);
         getApList();
     </script>
 </body>

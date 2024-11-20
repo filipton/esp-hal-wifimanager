@@ -5,7 +5,7 @@ use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_wifi::{
     wifi::{WifiController, WifiDevice, WifiStaDevice},
-    EspWifiInitialization,
+    EspWifiController,
 };
 use heapless::String;
 
@@ -15,7 +15,7 @@ use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
 #[cfg(feature = "ap")]
 pub async fn spawn_controller(
     generated_ssid: String<32>,
-    init: &EspWifiInitialization,
+    init: &'static EspWifiController<'static>,
     wifi: esp_hal::peripherals::WIFI,
     rng: &mut esp_hal::rng::Rng,
     spawner: &Spawner,
@@ -61,7 +61,7 @@ pub async fn spawn_controller(
 #[cfg(not(feature = "ap"))]
 pub async fn spawn_controller(
     _generated_ssid: String<32>,
-    init: &EspWifiInitialization,
+    init: &'static EspWifiController<'static>,
     wifi: esp_hal::peripherals::WIFI,
     _rng: &mut esp_hal::rng::Rng,
     _spawner: &Spawner,
@@ -79,8 +79,10 @@ pub async fn try_to_wifi_connect(
     wifi_conn_timeout: u64,
 ) -> bool {
     let start_time = embassy_time::Instant::now();
-    _ = controller.stop().await;
-    _ = controller.start().await;
+    /*
+    _ = controller.stop_async().await;
+    _ = controller.start_async().await;
+    */
 
     loop {
         if start_time.elapsed().as_millis() > wifi_conn_timeout {
@@ -90,7 +92,7 @@ pub async fn try_to_wifi_connect(
 
         match with_timeout(
             Duration::from_millis(wifi_conn_timeout),
-            controller.connect(),
+            controller.connect_async(),
         )
         .await
         {
@@ -133,7 +135,7 @@ pub async fn wifi_wait_for_ip(
 }
 
 pub fn get_efuse_mac() -> u64 {
-    esp_hal::efuse::Efuse::get_mac_address()
+    esp_hal::efuse::Efuse::mac_address()
         .iter()
         .fold(0u64, |acc, &x| (acc << 8) + x as u64)
 }

@@ -1,22 +1,25 @@
 #![no_std]
 
+#[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
+compile_error!("enable at least one feature (\"ble\", \"ap\", \"env\")!");
+
 extern crate alloc;
 use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::peripheral::Peripheral;
 use esp_hal::{
     peripherals::{RADIO_CLK, WIFI},
     rng::Rng,
 };
+use esp_wifi::EspWifiController;
 use esp_wifi::{
     wifi::{WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
-    EspWifiInitFor, EspWifiInitialization, EspWifiTimerSource,
+    EspWifiTimerSource,
 };
-use structs::{AutoSetupSettings, InternalInitFor, Result, WmInnerSignals, WmReturn};
+use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 
 pub use nvs::Nvs;
 pub use structs::{WmError, WmSettings};
@@ -37,43 +40,36 @@ mod utils;
 
 pub const WIFI_NVS_KEY: &'static [u8] = b"WIFI_SETUP";
 
-#[cfg(feature = "ble")]
-const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::WifiBle;
-#[cfg(not(feature = "ble"))]
-const WM_INIT_FOR: EspWifiInitFor = EspWifiInitFor::Wifi;
-#[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
-compile_error!("Enable at least one feature (\"ble\", \"ap\", \"env\")!");
+macro_rules! mk_static {
+    ($t:ty,$val:expr) => {{
+        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
+        #[deny(unused_attributes)]
+        let x = STATIC_CELL.uninit().write(($val));
+        x
+    }};
+}
 
-pub async fn init_wm(
-    init_for: EspWifiInitFor,
+pub async fn init_wm<T: EspWifiTimerSource>(
     settings: WmSettings,
-    timer: impl EspWifiTimerSource,
     spawner: &Spawner,
     nvs: &Nvs,
     mut rng: Rng,
+    timer: impl Peripheral<P = T> + 'static,
     radio_clocks: RADIO_CLK,
-    mut wifi: WIFI,
+    wifi: WIFI,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
 ) -> Result<WmReturn> {
-    let init_for = InternalInitFor::from_init_for(&init_for);
-    match init_for {
-        InternalInitFor::Wifi => {}
-        InternalInitFor::WifiBle => {
-            #[cfg(not(feature = "ble"))]
-            return Err(WmError::Other);
-        }
-        InternalInitFor::Ble => return Err(WmError::Other), // why would you require only bt? lmao
-    }
-
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
-    let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clocks)?;
-    let init_return_signal =
-        alloc::rc::Rc::new(Signal::<NoopRawMutex, EspWifiInitialization>::new());
+
+    let init = &*mk_static!(
+        EspWifiController<'static>,
+        esp_wifi::init(timer, rng.clone(), radio_clocks)?
+    );
 
     let (sta_interface, mut controller) =
         esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)?;
 
-    controller.start().await?;
+    controller.start_async().await?;
 
     let mut wifi_setup = [0; 1024];
     let wifi_setup = match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
@@ -108,14 +104,11 @@ pub async fn init_wm(
             controller,
         )
     } else {
-        _ = controller.stop().await;
+        _ = controller.stop_async().await;
         drop(sta_interface);
         drop(controller);
 
         let wm_signals = Rc::new(WmInnerSignals::new());
-        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
-        let init = esp_wifi::init(WM_INIT_FOR, timer, rng.clone(), radio_clk)?;
-
         let (sta_interface, mut controller) = utils::spawn_controller(
             generated_ssid.clone(),
             &init,
@@ -135,31 +128,23 @@ pub async fn init_wm(
         #[cfg(feature = "ble")]
         spawner.spawn(bluetooth::bluetooth_task(
             init,
-            init_return_signal.clone(),
             bt,
             generated_ssid,
             wm_signals.clone(),
         ))?;
 
-        #[cfg(not(feature = "ble"))]
-        init_return_signal.signal(init);
-
-        controller.start().await?;
+        controller.start_async().await?;
         let wifi_setup =
             wifi_connection_worker(settings.clone(), wm_signals, nvs, &mut controller).await?;
 
-        _ = controller.stop().await;
+        _ = controller.stop_async().await;
         drop(sta_interface);
         drop(controller);
-
-        let init = init_return_signal.wait().await;
-        let (timer, radio_clk) = unsafe { esp_wifi::deinit_unchecked(init)? };
-        let init = esp_wifi::init(init_for.to_init_for(), timer, rng.clone(), radio_clk)?;
 
         let (sta_interface, mut controller) =
             esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)?;
 
-        controller.start().await?;
+        controller.start_async().await?;
         controller.set_configuration(&wifi_setup.to_client_conf()?)?;
 
         (wifi_setup.data, init, sta_interface, controller)
@@ -211,21 +196,23 @@ async fn wifi_connection_worker(
                 utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await;
 
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
+
             if wifi_connected {
                 nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
 
                 #[cfg(feature = "ap")]
                 esp_hal_dhcp_server::dhcp_close();
 
+                Timer::after_millis(1000).await;
                 wm_signals.signal_end();
-
-                Timer::after_millis(100).await;
                 return Ok(setup_info);
             }
         }
 
         if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
-            let scan_res = controller.scan_with_config::<10>(Default::default()).await;
+            let scan_res = controller
+                .scan_with_config_async::<10>(Default::default())
+                .await;
 
             let mut wifis = wm_signals.wifi_scan_res.lock().await;
             wifis.clear();
@@ -253,19 +240,16 @@ async fn connection(
     mut controller: WifiController<'static>,
     //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
-    log::info!(
-        "WIFI Device capabilities: {:?}",
-        controller.get_capabilities()
-    );
+    log::info!("WIFI Device capabilities: {:?}", controller.capabilities());
 
     loop {
-        if esp_wifi::wifi::get_wifi_state() == WifiState::StaConnected {
+        if esp_wifi::wifi::wifi_state() == WifiState::StaConnected {
             // wait until we're no longer connected
             controller.wait_for_event(WifiEvent::StaDisconnected).await;
             Timer::after(Duration::from_millis(wifi_reconnect_time)).await
         }
 
-        match controller.connect().await {
+        match controller.connect_async().await {
             Ok(_) => {
                 log::info!("Wifi connected!");
             }

@@ -33,7 +33,6 @@ fn main() {
     }
 
     println!("cargo:rustc-link-arg-bins=-Tlinkall.x");
-    println!("cargo:rustc-link-arg-bins=-Trom_functions.x");
 }
 
 fn get_newest(path: &std::path::PathBuf) -> Option<std::path::PathBuf> {

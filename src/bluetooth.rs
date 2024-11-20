@@ -12,7 +12,7 @@ use embassy_futures::select::Either::{First, Second};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
-use esp_wifi::{ble::controller::asynch::BleConnector, EspWifiInitialization};
+use esp_wifi::{ble::controller::BleConnector, EspWifiController};
 use heapless::String;
 
 use crate::structs::WmInnerSignals;
@@ -26,8 +26,7 @@ use crate::structs::WmInnerSignals;
 
 #[embassy_executor::task]
 pub async fn bluetooth_task(
-    init: EspWifiInitialization,
-    init_return_signal: Rc<Signal<NoopRawMutex, EspWifiInitialization>>,
+    init: &'static EspWifiController<'static>,
     mut bt: BT,
     name: String<32>,
     signals: Rc<WmInnerSignals>,
@@ -36,7 +35,6 @@ pub async fn bluetooth_task(
     let ble_end_signal = Rc::new(Signal::<NoopRawMutex, ()>::new());
 
     let connector = BleConnector::new(&init, &mut bt);
-    init_return_signal.signal(init); // return the init value
 
     let now = || esp_hal::time::now().duration_since_epoch().to_millis();
     let mut ble = Ble::new(connector, now);

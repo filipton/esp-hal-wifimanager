@@ -21,7 +21,7 @@ macro_rules! make_static {
 
 #[main]
 async fn main(spawner: Spawner) {
-    esp_alloc::heap_allocator!(175 * 1024);
+    esp_alloc::heap_allocator!(150 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     /*
@@ -50,15 +50,14 @@ async fn main(spawner: Spawner) {
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let wifi_res = esp_hal_wifimanager::init_wm(
-        esp_wifi::EspWifiInitFor::WifiBle,
         wm_settings,
-        timg0.timer0,
+        &spawner,
+        &nvs,
         rng.clone(),
+        timg0.timer0,
         peripherals.RADIO_CLK,
         peripherals.WIFI,
         peripherals.BT,
-        &spawner,
-        &nvs,
     )
     .await;
 

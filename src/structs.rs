@@ -7,7 +7,7 @@ use embassy_sync::{
 };
 use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiDevice, WifiError, WifiStaDevice},
-    EspWifiInitFor, EspWifiInitialization, InitializationError,
+    EspWifiController, InitializationError,
 };
 use heapless::String;
 use serde::Deserialize;
@@ -91,7 +91,7 @@ impl AutoSetupSettings {
         }))
     }
 }
-    
+
 impl WmSettings {
     /// Defaults for esp32 (with defaut partition schema)
     ///
@@ -114,7 +114,7 @@ impl WmSettings {
 }
 
 pub struct WmReturn {
-    pub wifi_init: EspWifiInitialization,
+    pub wifi_init: &'static EspWifiController<'static>,
     pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
@@ -124,7 +124,6 @@ impl ::core::fmt::Debug for WmReturn {
     #[inline]
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
         f.debug_struct("WmReturn")
-            .field("wifi_init", &self.wifi_init)
             .field("data", &self.data)
             .field("ip_address", &self.ip_address)
             .finish()
@@ -168,42 +167,5 @@ impl WmInnerSignals {
             .publisher()
             .expect("Should fail getting publisher")
             .publish_immediate(());
-    }
-}
-
-#[derive(Clone)]
-#[allow(dead_code)]
-pub enum InternalInitFor {
-    Wifi,
-    Ble,
-    WifiBle,
-}
-
-impl InternalInitFor {
-    pub fn to_init_for(&self) -> EspWifiInitFor {
-        match self {
-            InternalInitFor::Wifi => EspWifiInitFor::Wifi,
-
-            #[cfg(feature = "ble")]
-            InternalInitFor::Ble => EspWifiInitFor::Ble,
-
-            #[cfg(feature = "ble")]
-            InternalInitFor::WifiBle => EspWifiInitFor::WifiBle,
-
-            #[cfg(not(feature = "ble"))]
-            InternalInitFor::Ble | InternalInitFor::WifiBle => panic!("Ble feature not enabled!"),
-        }
-    }
-
-    pub fn from_init_for(init_for: &EspWifiInitFor) -> Self {
-        match init_for {
-            EspWifiInitFor::Wifi => Self::Wifi,
-
-            #[cfg(feature = "ble")]
-            EspWifiInitFor::Ble => Self::Ble,
-
-            #[cfg(feature = "ble")]
-            EspWifiInitFor::WifiBle => Self::WifiBle,
-        }
     }
 }
