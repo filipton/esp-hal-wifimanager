@@ -8,6 +8,8 @@ use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::peripheral::Peripheral;
 use esp_hal::{
@@ -58,6 +60,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     radio_clocks: RADIO_CLK,
     wifi: WIFI,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
+    ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
 ) -> Result<WmReturn> {
     let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
 
@@ -104,6 +107,10 @@ pub async fn init_wm<T: EspWifiTimerSource>(
             controller,
         )
     } else {
+        if let Some(ap_start_signal) = ap_start_signal {
+            ap_start_signal.signal(());
+        }
+
         _ = controller.stop_async().await;
         drop(sta_interface);
         drop(controller);

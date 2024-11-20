@@ -58,6 +58,7 @@ async fn main(spawner: Spawner) {
         peripherals.RADIO_CLK,
         peripherals.WIFI,
         peripherals.BT,
+        None,
     )
     .await;
 
