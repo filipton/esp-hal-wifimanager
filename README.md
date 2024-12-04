@@ -23,6 +23,8 @@ cargo run --config "env.WM_CONN='{\"ssid\": \"ssid\", \"psk\": \"pass\", \"data\
 
 ## Simple example
 Add this to your Cargo.toml (note also add `embassy`, its only for async):
+
+NOTE: this section is not updated, will update it sometime near feature.
 ```toml
 [dependencies]
 esp-hal = { version = "0.19.0", features = [ "esp32s3", "async" ] }
@@ -33,20 +35,20 @@ esp-hal-embassy = { version = "0.2.0", features = ["integrated-timers", "esp32s3
 Simple example (to see full example check `./examples` dir):
 ```rust
 // ...
-let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000);
+let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000).unwrap();
 let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
 
 let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
 let wifi_res = esp_hal_wifimanager::init_wm(
-    esp_wifi::EspWifiInitFor::WifiBle,
     wm_settings,
-    timg0.timer0,
     &spawner,
     &nvs,
     rng.clone(),
+    timg0.timer0,
     peripherals.RADIO_CLK,
     peripherals.WIFI,
-    peripherals.BT,
+    peripherals.BT, // only if ble feature is enabled
+    None, // signal for ap/ble start
 )
 .await;
 ```

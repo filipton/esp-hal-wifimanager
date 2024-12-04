@@ -38,8 +38,8 @@ async fn main(spawner: Spawner) {
     esp_hal_embassy::init(timg1.timer0);
 
     let rng = esp_hal::rng::Rng::new(peripherals.RNG);
+    let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000).unwrap();
 
-    let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000);
     let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
     wm_settings.ssid_generator = |efuse| {
         let mut generated_name = heapless::String::<32>::new();

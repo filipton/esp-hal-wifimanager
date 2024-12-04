@@ -5,18 +5,25 @@ use embassy_sync::{
     semaphore::{GreedySemaphore, Semaphore},
 };
 use embedded_storage::{ReadStorage, Storage};
+use portable_atomic::AtomicU8;
 use tickv::FlashController;
 
 static mut NVS_READ_BUF: &'static mut [u8; 1024] = &mut [0; 1024];
+static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
-#[derive(Clone)]
 pub struct Nvs {
     tickv: Rc<tickv::TicKV<'static, NvsFlash, 1024>>,
     semaphore: Rc<GreedySemaphore<CriticalSectionRawMutex>>,
 }
 
 impl Nvs {
-    pub fn new(flash_offset: usize, flash_size: usize) -> Self {
+    pub fn new(flash_offset: usize, flash_size: usize) -> Result<Self, ()> {
+        if NVS_INSTANCES.load(core::sync::atomic::Ordering::Relaxed) > 0 {
+            log::error!("Cannot spawn new NVS struct, clone original one instead!");
+            return Err(());
+        }
+
+        NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
             NvsFlash::new(flash_offset),
             unsafe { NVS_READ_BUF },
@@ -25,10 +32,10 @@ impl Nvs {
         nvs.initialise(hash(tickv::MAIN_KEY))
             .expect("Cannot initalise nvs");
 
-        Nvs {
+        Ok(Nvs {
             tickv: Rc::new(nvs),
             semaphore: Rc::new(GreedySemaphore::new(1)),
-        }
+        })
     }
 
     pub async fn get_key(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
@@ -47,6 +54,23 @@ impl Nvs {
         let _drop = self.semaphore.acquire(1).await.unwrap();
         self.tickv.invalidate_key(hash(key))?;
         Ok(())
+    }
+}
+
+impl Drop for Nvs {
+    fn drop(&mut self) {
+        NVS_INSTANCES.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Clone for Nvs {
+    fn clone(&self) -> Self {
+        NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+
+        Self {
+            tickv: self.tickv.clone(),
+            semaphore: self.semaphore.clone(),
+        }
     }
 }
 
