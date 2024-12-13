@@ -13,7 +13,7 @@ use heapless::String;
 use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
 
 #[cfg(feature = "ap")]
-pub async fn spawn_controller(
+pub async fn spawn_ap_controller(
     generated_ssid: String<32>,
     init: &'static EspWifiController<'static>,
     wifi: esp_hal::peripherals::WIFI,
@@ -26,7 +26,7 @@ pub async fn spawn_controller(
         ssid: generated_ssid,
         ..Default::default()
     };
-    let ap_ip = embassy_net::Ipv4Address([192, 168, 4, 1]);
+    let ap_ip = embassy_net::Ipv4Address::new(192, 168, 4, 1);
     let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
         address: Ipv4Cidr::new(ap_ip, 24),
         gateway: Some(ap_ip),
@@ -36,7 +36,7 @@ pub async fn spawn_controller(
     let (ap_interface, sta_interface, controller) =
         esp_wifi::wifi::new_ap_sta_with_config(init, wifi, Default::default(), ap_config)?;
 
-    let ap_stack = Rc::new(Stack::new(
+    let (ap_stack, ap_runner) = embassy_net::new(
         ap_interface,
         ap_ip_config,
         {
@@ -45,15 +45,15 @@ pub async fn spawn_controller(
             STATIC_CELL.uninit().write(StackResources::<3>::new())
         },
         rng.random() as u64,
-    ));
+    );
 
-    spawner.spawn(crate::ap::run_dhcp_server(ap_stack.clone()))?;
+    spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
     spawner.spawn(crate::http::run_http_server(
         ap_stack.clone(),
         wm_signals.clone(),
         settings.wifi_panel,
     ))?;
-    spawner.spawn(crate::ap::ap_task(ap_stack, wm_signals.clone()))?;
+    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
 
     Ok((sta_interface, controller))
 }
@@ -113,9 +113,7 @@ pub async fn try_to_wifi_connect(
     }
 }
 
-pub async fn wifi_wait_for_ip(
-    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
-) -> [u8; 4] {
+pub async fn wifi_wait_for_ip(stack: &Stack<'static>) -> [u8; 4] {
     while !stack.is_link_up() {
         Timer::after(Duration::from_millis(50)).await;
     }
@@ -125,7 +123,7 @@ pub async fn wifi_wait_for_ip(
     loop {
         if let Some(config) = stack.config_v4() {
             log::info!("Got IP: {}", config.address);
-            ip.copy_from_slice(config.address.address().as_bytes());
+            ip.copy_from_slice(&config.address.address().octets());
             break;
         }
         Timer::after(Duration::from_millis(50)).await;

@@ -6,7 +6,7 @@ use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex, mutex::Mutex, pubsub::PubSubChannel, signal::Signal,
 };
 use esp_wifi::{
-    wifi::{ClientConfiguration, Configuration, WifiDevice, WifiError, WifiStaDevice},
+    wifi::{ClientConfiguration, Configuration, WifiError},
     EspWifiController, InitializationError,
 };
 use heapless::String;
@@ -115,7 +115,7 @@ impl WmSettings {
 
 pub struct WmReturn {
     pub wifi_init: &'static EspWifiController<'static>,
-    pub sta_stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    pub sta_stack: Stack<'static>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
 }

@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
-use embassy_net::{Config, Stack, StackResources};
+use embassy_net::{Config, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -116,7 +116,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         drop(controller);
 
         let wm_signals = Rc::new(WmInnerSignals::new());
-        let (sta_interface, mut controller) = utils::spawn_controller(
+        let (sta_interface, mut controller) = utils::spawn_ap_controller(
             generated_ssid.clone(),
             &init,
             unsafe { wifi.clone_unchecked() },
@@ -158,23 +158,20 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     };
 
     let sta_config = Config::dhcpv4(Default::default());
-    let sta_stack = &*{
-        static STATIC_CELL: static_cell::StaticCell<Stack<WifiDevice<WifiStaDevice>>> =
-            static_cell::StaticCell::new();
-        STATIC_CELL.uninit().write(Stack::new(
-            sta_interface,
-            sta_config,
-            {
-                static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                    static_cell::StaticCell::new();
-                STATIC_CELL.uninit().write(StackResources::<3>::new())
-            },
-            rng.random() as u64,
-        ))
-    };
+
+    let (sta_stack, runner) = embassy_net::new(
+        sta_interface,
+        sta_config,
+        {
+            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write(StackResources::<3>::new())
+        },
+        rng.random() as u64,
+    );
 
     spawner.spawn(connection(settings.wifi_reconnect_time, controller))?;
-    spawner.spawn(sta_task(sta_stack))?;
+    spawner.spawn(sta_task(runner))?;
 
     Ok(WmReturn {
         wifi_init: init,
@@ -269,6 +266,6 @@ async fn connection(
 }
 
 #[embassy_executor::task]
-async fn sta_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
-    stack.run().await
+async fn sta_task(mut runner: Runner<'static, WifiDevice<'static, WifiStaDevice>>) {
+    runner.run().await
 }

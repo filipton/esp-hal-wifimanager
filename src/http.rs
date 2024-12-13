@@ -2,12 +2,11 @@ use crate::structs::WmInnerSignals;
 use alloc::rc::Rc;
 use embassy_net::{tcp::TcpSocket, IpListenEndpoint, Stack};
 use embedded_io_async::Write;
-use esp_wifi::wifi::{WifiApDevice, WifiDevice};
 use httparse::Header;
 
 #[embassy_executor::task]
 pub async fn run_http_server(
-    ap_stack: Rc<Stack<WifiDevice<'static, WifiApDevice>>>,
+    ap_stack: Stack<'static>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
 ) {
@@ -15,7 +14,7 @@ pub async fn run_http_server(
         let mut rx_buffer = [0; 4096];
         let mut tx_buffer = [0; 4096];
 
-        let mut socket = TcpSocket::new(&ap_stack, &mut rx_buffer, &mut tx_buffer);
+        let mut socket = TcpSocket::new(ap_stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(embassy_time::Duration::from_secs(60)));
 
         let mut buf = [0; 2048];
