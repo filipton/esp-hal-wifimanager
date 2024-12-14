@@ -47,13 +47,15 @@ pub async fn spawn_ap_controller(
         rng.random() as u64,
     );
 
+    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
     spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
-    spawner.spawn(crate::http::run_http_server(
+    crate::http::run_http_server(
+        spawner,
         ap_stack.clone(),
         wm_signals.clone(),
         settings.wifi_panel,
-    ))?;
-    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
+    )
+    .await;
 
     Ok((sta_interface, controller))
 }

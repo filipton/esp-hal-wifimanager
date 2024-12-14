@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(impl_trait_in_assoc_type)]
 
 #[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
 compile_error!("enable at least one feature (\"ble\", \"ap\", \"env\")!");

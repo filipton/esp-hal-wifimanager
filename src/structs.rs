@@ -10,7 +10,7 @@ use esp_wifi::{
     EspWifiController, InitializationError,
 };
 use heapless::String;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub type Result<T> = core::result::Result<T, WmError>;
 
@@ -75,7 +75,7 @@ pub struct WmSettings {
     pub wifi_scan_interval: u64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AutoSetupSettings {
     pub ssid: alloc::string::String,
     pub psk: alloc::string::String,
@@ -139,7 +139,7 @@ pub struct WmInnerSignals {
     /// This is used to tell ble task about conn result
     pub wifi_conn_res_sig: Signal<NoopRawMutex, bool>,
 
-    end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 10, 1>,
+    end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 16, 1>,
 }
 
 impl WmInnerSignals {

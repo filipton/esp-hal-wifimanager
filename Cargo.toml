@@ -31,9 +31,9 @@ esp-hal-dhcp-server = { version = "0.2.1", optional = true }
 embassy-futures = "0.1.1"
 serde = { version = "1.0.216", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.133", default-features = false, features = ["alloc"] }
-httparse = { version = "1.9.5", default-features = false, optional = true }
 embedded-io-async = "0.6.1"
 portable-atomic = { version = "1.10.0", default-features = false }
+picoserve = { version = "0.13.2", optional = true, features = ["alloc", "embassy"] }
 
 [features]
 #default = []
@@ -41,6 +41,6 @@ portable-atomic = { version = "1.10.0", default-features = false }
 default = ["esp32s3", "ap", "ble"]
 esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-storage/esp32s3"]
 esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3"]
-ap = ["dep:esp-hal-dhcp-server", "dep:httparse"]
+ap = ["dep:esp-hal-dhcp-server", "dep:picoserve"]
 ble = ["dep:bleps", "esp-wifi/ble", "esp-wifi/coex"]
 env = []
