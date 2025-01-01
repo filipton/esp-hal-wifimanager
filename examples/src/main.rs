@@ -41,11 +41,13 @@ async fn main(spawner: Spawner) {
     let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000).unwrap();
 
     let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
-    wm_settings.ssid_generator = |efuse| {
-        let mut generated_name = heapless::String::<32>::new();
-        _ = core::fmt::write(&mut generated_name, format_args!("TEST-{:X}", efuse));
-        generated_name
-    };
+
+    wm_settings.ssid.clear();
+    _ = core::fmt::write(
+        &mut wm_settings.ssid,
+        format_args!("TEST-{:X}", esp_hal_wifimanager::get_efuse_mac()),
+    );
+
     wm_settings.wifi_conn_timeout = 30000;
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);

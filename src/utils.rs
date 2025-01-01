@@ -139,21 +139,3 @@ pub fn get_efuse_mac() -> u64 {
         .iter()
         .fold(0u64, |acc, &x| (acc << 8) + x as u64)
 }
-
-/// This function returns value with maximum of signed integer
-/// (2147483647) to easily store it in postgres db as integer
-///
-/// TODO: remove this
-#[allow(dead_code)]
-pub fn get_efuse_u32() -> u32 {
-    let mut efuse = get_efuse_mac();
-    efuse = (!efuse).wrapping_add(efuse << 18);
-    efuse = efuse ^ (efuse >> 31);
-    efuse = efuse.wrapping_mul(21);
-    efuse = efuse ^ (efuse >> 11);
-    efuse = efuse.wrapping_add(efuse << 6);
-    efuse = efuse ^ (efuse >> 22);
-
-    let mac = efuse & 0x000000007FFFFFFF;
-    mac as u32
-}

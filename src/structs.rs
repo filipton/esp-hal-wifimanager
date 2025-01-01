@@ -12,6 +12,8 @@ use esp_wifi::{
 use heapless::String;
 use serde::{Deserialize, Serialize};
 
+use crate::get_efuse_mac;
+
 pub type Result<T> = core::result::Result<T, WmError>;
 
 #[derive(Debug)]
@@ -67,7 +69,7 @@ impl From<()> for WmError {
 
 #[derive(Clone, Debug)]
 pub struct WmSettings {
-    pub ssid_generator: fn(u64) -> heapless::String<32>,
+    pub ssid: heapless::String<32>,
     pub wifi_panel: &'static str,
 
     pub wifi_conn_timeout: u64,
@@ -98,9 +100,12 @@ impl WmSettings {
     /// Checked on esp32s3 and esp32c3
     pub fn default() -> Self {
         Self {
-            ssid_generator: |efuse| {
+            ssid: {
                 let mut generated_name = heapless::String::<32>::new();
-                _ = core::fmt::write(&mut generated_name, format_args!("ESP-{:X}", efuse));
+                _ = core::fmt::write(
+                    &mut generated_name,
+                    format_args!("ESP-{:X}", get_efuse_mac()),
+                );
 
                 generated_name
             },

@@ -26,7 +26,7 @@ use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 
 pub use nvs::Nvs;
 pub use structs::{WmError, WmSettings};
-pub use utils::{get_efuse_mac, get_efuse_u32};
+pub use utils::get_efuse_mac;
 
 #[cfg(feature = "ap")]
 mod http;
@@ -63,7 +63,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
     ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
 ) -> Result<WmReturn> {
-    let generated_ssid = (settings.ssid_generator)(utils::get_efuse_mac());
+    let generated_ssid = settings.ssid.clone();
 
     let init = &*mk_static!(
         EspWifiController<'static>,
@@ -108,6 +108,8 @@ pub async fn init_wm<T: EspWifiTimerSource>(
             controller,
         )
     } else {
+        log::info!("Starting wifimanager with ssid: {generated_ssid}");
+
         if let Some(ap_start_signal) = ap_start_signal {
             ap_start_signal.signal(());
         }
