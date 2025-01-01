@@ -49,6 +49,7 @@ async fn main(spawner: Spawner) {
     );
 
     wm_settings.wifi_conn_timeout = 30000;
+    wm_settings.esp_reset_timeout = Some(300000); // 5min
 
     let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let wifi_res = esp_hal_wifimanager::init_wm(

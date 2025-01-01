@@ -69,12 +69,24 @@ impl From<()> for WmError {
 
 #[derive(Clone, Debug)]
 pub struct WmSettings {
+    /// SSID and ble name
     pub ssid: heapless::String<32>,
+
+    /// Panel hosted on AP (html)
+    /// TODO: Make this as dictionary so, you will be able to upload more files
     pub wifi_panel: &'static str,
 
+    /// Max time WiFi will try to connect (in ms)
     pub wifi_conn_timeout: u64,
+
+    /// Delay on wifi reconnection after connection loss (in ms)
     pub wifi_reconnect_time: u64,
+
+    /// WiFi scan inverval (in ms)
     pub wifi_scan_interval: u64,
+
+    /// Time after which esp will restart while waiting for wifi setup (in ms)
+    pub esp_reset_timeout: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -114,6 +126,8 @@ impl WmSettings {
             wifi_reconnect_time: 1000,
             wifi_conn_timeout: 15000,
             wifi_scan_interval: 15000,
+
+            esp_reset_timeout: None,
         }
     }
 }

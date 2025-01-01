@@ -190,6 +190,7 @@ async fn wifi_connection_worker(
     nvs: &Nvs,
     controller: &mut WifiController<'static>,
 ) -> Result<AutoSetupSettings> {
+    let start_time = Instant::now();
     let mut last_scan = Instant::MIN;
     loop {
         if wm_signals.wifi_conn_info_sig.signaled() {
@@ -235,6 +236,14 @@ async fn wifi_connection_worker(
             }
 
             last_scan = Instant::now();
+        }
+
+        if let Some(reset_timeout) = settings.esp_reset_timeout {
+            if start_time.elapsed().as_millis() >= reset_timeout {
+                log::info!("Wifimanager esp reset timeout reached! Resetting..");
+                Timer::after_millis(1000).await;
+                esp_hal::reset::software_reset();
+            }
         }
 
         Timer::after_millis(100).await;
