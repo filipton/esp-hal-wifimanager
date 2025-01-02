@@ -222,18 +222,16 @@ async fn wifi_connection_worker(
 
         if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
             let scan_res = controller
-                .scan_with_config_async::<10>(Default::default())
+                .scan_with_config_async::<15>(Default::default())
                 .await;
 
             let mut wifis = wm_signals.wifi_scan_res.lock().await;
             wifis.clear();
-            if let Ok((dsa, count)) = scan_res {
-                for i in 0..count {
-                    let d = &dsa[i];
-
+            if let Ok((aps, _count)) = scan_res {
+                for ap in aps {
                     _ = core::fmt::write(
                         wifis.deref_mut(),
-                        format_args!("{}: {}\n", d.ssid, d.signal_strength),
+                        format_args!("{}: {}\n", ap.ssid, ap.signal_strength),
                     );
                 }
             }
