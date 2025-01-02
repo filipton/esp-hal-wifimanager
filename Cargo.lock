@@ -561,7 +561,10 @@ dependencies = [
  "esp-riscv-rt",
  "esp-synopsys-usb-otg",
  "esp32",
+ "esp32c2",
  "esp32c3",
+ "esp32c6",
+ "esp32s2",
  "esp32s3",
  "fugit",
  "nb 1.1.0",
@@ -753,10 +756,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "esp32c2"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e74f8ceff5249a39f6ffeaea7a9c048b36fd1ba67d365330e0970927c57759ab"
+dependencies = [
+ "critical-section",
+ "vcell",
+]
+
+[[package]]
 name = "esp32c3"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d1750382dc49fa333ee6b1ba96f8c540038b9666f5a233dc1221c98e3236118"
+dependencies = [
+ "critical-section",
+ "vcell",
+]
+
+[[package]]
+name = "esp32c6"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b98fcf7ae90ee4d55f06170dfeaaebbf2a1619bb38b4e14b9009b4d636b87e7"
+dependencies = [
+ "critical-section",
+ "vcell",
+]
+
+[[package]]
+name = "esp32s2"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f77ec7a694eb60741f53236e625456abf672ba5b0b73c4a2d708a343c6f3495"
 dependencies = [
  "critical-section",
  "vcell",
@@ -1098,6 +1131,9 @@ name = "portable-atomic"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "280dc24453071f1b63954171985a0b0d30058d287960968b9b2aca264c8d4ee6"
+dependencies = [
+ "critical-section",
+]
 
 [[package]]
 name = "portable_atomic_enum"

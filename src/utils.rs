@@ -61,7 +61,7 @@ pub async fn spawn_ap_controller(
 }
 
 #[cfg(not(feature = "ap"))]
-pub async fn spawn_controller(
+pub async fn spawn_ap_controller(
     _generated_ssid: String<32>,
     init: &'static EspWifiController<'static>,
     wifi: esp_hal::peripherals::WIFI,

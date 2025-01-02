@@ -4,6 +4,9 @@
 #[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
 compile_error!("enable at least one feature (\"ble\", \"ap\", \"env\")!");
 
+#[cfg(all(feature = "ble", feature = "esp32s2"))]
+compile_error!("ESP32-S2 doesnt support BLE!");
+
 extern crate alloc;
 use alloc::rc::Rc;
 use core::ops::DerefMut;
