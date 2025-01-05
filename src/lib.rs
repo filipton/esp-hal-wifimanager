@@ -160,6 +160,12 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         controller.start_async().await?;
         controller.set_configuration(&wifi_setup.to_client_conf()?)?;
 
+        if settings.esp_restart_after_connection {
+            log::info!("Wifimanager reset after succesfull first connection...");
+            Timer::after_millis(1000).await;
+            esp_hal::reset::software_reset();
+        }
+
         (wifi_setup.data, init, sta_interface, controller)
     };
 
