@@ -8,6 +8,9 @@ use embedded_storage::{ReadStorage, Storage};
 use portable_atomic::AtomicU8;
 use tickv::FlashController;
 
+const PART_OFFSET: u32 = 0x8000;
+const PART_SIZE: u32 = 0xc00;
+
 static mut NVS_READ_BUF: &'static mut [u8; 1024] = &mut [0; 1024];
 static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
@@ -17,10 +20,10 @@ pub struct Nvs {
 }
 
 impl Nvs {
-    pub fn new(flash_offset: usize, flash_size: usize) -> Result<Self, ()> {
+    pub fn new(flash_offset: usize, flash_size: usize) -> crate::Result<Self> {
         if NVS_INSTANCES.load(core::sync::atomic::Ordering::Relaxed) > 0 {
             log::error!("Cannot spawn new NVS struct, clone original one instead!");
-            return Err(());
+            return Err(crate::WmError::NvsError);
         }
 
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
@@ -29,13 +32,50 @@ impl Nvs {
             unsafe { NVS_READ_BUF },
             flash_size,
         );
-        nvs.initialise(hash(tickv::MAIN_KEY))
-            .expect("Cannot initalise nvs");
+        nvs.initialise(hash(tickv::MAIN_KEY))?;
 
         Ok(Nvs {
             tickv: Rc::new(nvs),
             semaphore: Rc::new(GreedySemaphore::new(1)),
         })
+    }
+
+    pub fn new_from_part_table() -> crate::Result<Self> {
+        let mut flash = esp_storage::FlashStorage::new();
+
+        let mut nvs_part = None;
+        let mut bytes = [0xFF; 32];
+        for read_offset in (0..PART_SIZE).step_by(32) {
+            _ = flash.read(PART_OFFSET + read_offset, &mut bytes);
+            if &bytes == &[0xFF; 32] {
+                break;
+            }
+
+            let magic = &bytes[0..2];
+            if magic != &[0xAA, 0x50] {
+                continue;
+            }
+
+            let p_type = &bytes[2];
+            let p_subtype = &bytes[3];
+            let p_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+            let p_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+            //let p_name = core::str::from_utf8(&bytes[12..28]).unwrap();
+            //let p_flags = u32::from_le_bytes(bytes[28..32].try_into().unwrap());
+            //log::info!("{magic:?} {p_type} {p_subtype} {p_offset} {p_size} {p_name} {p_flags}");
+
+            if *p_type == 1 && *p_subtype == 2 {
+                nvs_part = Some((p_offset, p_size));
+                break;
+            }
+        }
+
+        if let Some((offset, size)) = nvs_part {
+            return Self::new(offset as usize, size as usize);
+        } else {
+            log::error!("Nvs partition not found!");
+            return Err(crate::WmError::Other);
+        }
     }
 
     pub async fn get_key(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {

@@ -27,6 +27,7 @@ pub enum WmError {
     WifiInitalizationError(InitializationError),
     SerdeError(serde_json::Error),
     TaskSpawnError,
+    NvsError,
 
     Other,
 }
@@ -89,7 +90,7 @@ pub struct WmSettings {
     pub esp_reset_timeout: Option<u64>,
 
     /// Indicates if esp should restart after succesfull first connection
-    pub esp_restart_after_connection: bool
+    pub esp_restart_after_connection: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -131,7 +132,7 @@ impl WmSettings {
             wifi_scan_interval: 15000,
 
             esp_reset_timeout: None,
-            esp_restart_after_connection: false
+            esp_restart_after_connection: false,
         }
     }
 }
