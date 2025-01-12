@@ -6,7 +6,7 @@ use embassy_sync::{
 };
 use embedded_storage::{ReadStorage, Storage};
 use portable_atomic::AtomicU8;
-use tickv::FlashController;
+use tickv::{ErrorCode, FlashController};
 
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
@@ -17,6 +17,9 @@ static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 pub struct Nvs {
     tickv: Rc<tickv::TicKV<'static, NvsFlash, 1024>>,
     semaphore: Rc<GreedySemaphore<CriticalSectionRawMutex>>,
+
+    offset: usize,
+    size: usize,
 }
 
 impl Nvs {
@@ -37,6 +40,9 @@ impl Nvs {
         Ok(Nvs {
             tickv: Rc::new(nvs),
             semaphore: Rc::new(GreedySemaphore::new(1)),
+
+            offset: flash_offset,
+            size: flash_size,
         })
     }
 
@@ -86,7 +92,30 @@ impl Nvs {
 
     pub async fn append_key(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
         let _drop = self.semaphore.acquire(1).await.unwrap();
-        self.tickv.append_key(hash(key), buf)?;
+        let res = self.tickv.append_key(hash(key), buf);
+        if let Err(e) = res {
+            if e == ErrorCode::UnsupportedVersion {
+                log::error!(
+                    "Unsupported version while appending flash key... Wiping NVS partition!"
+                );
+
+                let mut flash = esp_storage::FlashStorage::new();
+                let mut written = 0;
+
+                while written < self.size {
+                    let chunk = [0; 1024];
+                    let chunk_size = (self.size - written).min(1024);
+
+                    _ = flash.write((self.offset + written) as u32, &chunk[..chunk_size]);
+                    written += chunk_size;
+                }
+
+                drop(flash);
+                self.tickv.initialise(hash(tickv::MAIN_KEY))?;
+                self.tickv.append_key(hash(key), buf)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -110,6 +139,8 @@ impl Clone for Nvs {
         Self {
             tickv: self.tickv.clone(),
             semaphore: self.semaphore.clone(),
+            offset: self.offset,
+            size: self.size,
         }
     }
 }
