@@ -5,7 +5,7 @@
 use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_backtrace as _;
-use esp_hal::{prelude::*, timer::timg::TimerGroup};
+use esp_hal::timer::timg::TimerGroup;
 
 /*
 // TODO: maybe i should make another crate for this make_static?
@@ -19,7 +19,7 @@ macro_rules! make_static {
 }
 */
 
-#[main]
+#[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     esp_alloc::heap_allocator!(150 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());

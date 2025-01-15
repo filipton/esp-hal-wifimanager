@@ -163,11 +163,10 @@ impl FlashController<1024> for NvsFlash {
     fn read_region(
         &self,
         region_number: usize,
-        offset: usize,
         buf: &mut [u8; 1024],
     ) -> Result<(), tickv::ErrorCode> {
         if let Ok(mut flash) = self.flash.try_lock() {
-            let offset = region_number * 1024 + offset;
+            let offset = region_number * 1024;
             flash
                 .read(self.flash_offset + offset as u32, buf)
                 .map_err(|_| tickv::ErrorCode::ReadFail)
