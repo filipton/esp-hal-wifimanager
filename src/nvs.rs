@@ -30,6 +30,10 @@ impl Nvs {
         }
 
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        unsafe { Self::new_unchecked(flash_offset, flash_size) }
+    }
+
+    pub unsafe fn new_unchecked(flash_offset: usize, flash_size: usize) -> crate::Result<Self> {
         let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
             NvsFlash::new(flash_offset),
             unsafe { NVS_READ_BUF },
@@ -47,6 +51,15 @@ impl Nvs {
     }
 
     pub fn new_from_part_table() -> crate::Result<Self> {
+        if let Some((offset, size)) = Self::read_nvs_partition_offset() {
+            return Self::new(offset, size);
+        } else {
+            log::error!("Nvs partition not found!");
+            return Err(crate::WmError::Other);
+        }
+    }
+
+    pub fn read_nvs_partition_offset() -> Option<(usize, usize)> {
         let mut flash = esp_storage::FlashStorage::new();
 
         let mut nvs_part = None;
@@ -76,12 +89,7 @@ impl Nvs {
             }
         }
 
-        if let Some((offset, size)) = nvs_part {
-            return Self::new(offset as usize, size as usize);
-        } else {
-            log::error!("Nvs partition not found!");
-            return Err(crate::WmError::Other);
-        }
+        nvs_part.map(|(offset, size)| (offset as usize, size as usize))
     }
 
     pub async fn get_key(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
