@@ -132,6 +132,44 @@ impl Nvs {
         self.tickv.invalidate_key(hash(key))?;
         Ok(())
     }
+
+    pub unsafe fn get_key_unchecked(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
+        self.tickv.get_key(hash(key), buf)?;
+        Ok(())
+    }
+
+    pub unsafe fn append_key_unckeched(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
+        let res = self.tickv.append_key(hash(key), buf);
+        if let Err(e) = res {
+            if e == ErrorCode::UnsupportedVersion {
+                log::error!(
+                    "Unsupported version while appending flash key... Wiping NVS partition!"
+                );
+
+                let mut flash = esp_storage::FlashStorage::new();
+                let mut written = 0;
+
+                while written < self.size {
+                    let chunk = [0; 1024];
+                    let chunk_size = (self.size - written).min(1024);
+
+                    _ = flash.write((self.offset + written) as u32, &chunk[..chunk_size]);
+                    written += chunk_size;
+                }
+
+                drop(flash);
+                self.tickv.initialise(hash(tickv::MAIN_KEY))?;
+                self.tickv.append_key(hash(key), buf)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub unsafe fn invalidate_key_unchecked(&self, key: &[u8]) -> crate::Result<()> {
+        self.tickv.invalidate_key(hash(key))?;
+        Ok(())
+    }
 }
 
 impl Drop for Nvs {
