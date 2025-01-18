@@ -23,11 +23,11 @@ log = "0.4.25"
 embassy-time = { version = "0.4.0", default-features = false }
 embassy-executor = { version = "0.7.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false }
-embassy-sync = { version = "0.6.1", default-features = false }
+embassy-sync = { version = "0.6.2", default-features = false }
 esp-storage = { version = "0.4.0", default-features = false, features = ["storage", "critical-section"] }
 embedded-storage = "0.3.1"
 tickv = "2.0.0"
-esp-hal-dhcp-server = { version = "0.2.3", optional = true }
+esp-hal-dhcp-server = { version = "0.2.4", optional = true }
 embassy-futures = "0.1.1"
 serde = { version = "1.0.217", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.135", default-features = false, features = ["alloc"] }
