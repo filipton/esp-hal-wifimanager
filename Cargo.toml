@@ -30,10 +30,10 @@ tickv = "2.0.0"
 esp-hal-dhcp-server = { version = "0.2.4", optional = true }
 embassy-futures = "0.1.1"
 serde = { version = "1.0.217", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1.0.135", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.137", default-features = false, features = ["alloc"] }
 embedded-io-async = "0.6.1"
 portable-atomic = { version = "1.10.0", default-features = false }
-picoserve = { git = "https://github.com/hodasemi/picoserve", rev = "c4fe40eccfcd1188f117d4b7c689f6dc48c94d44", optional = true, features = ["alloc", "embassy"] }
+picoserve = { version = "0.14.1", optional = true, features = ["alloc", "embassy"] }
 
 [features]
 #default = []

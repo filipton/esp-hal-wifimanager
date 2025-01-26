@@ -40,9 +40,9 @@ pub async fn spawn_ap_controller(
         ap_interface,
         ap_ip_config,
         {
-            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+            static STATIC_CELL: static_cell::StaticCell<StackResources<6>> =
                 static_cell::StaticCell::new();
-            STATIC_CELL.uninit().write(StackResources::<3>::new())
+            STATIC_CELL.uninit().write(StackResources::<6>::new())
         },
         rng.random() as u64,
     );
