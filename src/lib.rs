@@ -12,7 +12,7 @@ use alloc::rc::Rc;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Runner, StackResources};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::peripheral::Peripheral;
@@ -182,7 +182,12 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         rng.random() as u64,
     );
 
-    spawner.spawn(connection(settings.wifi_reconnect_time, controller))?;
+    let stop_signal = Rc::new(Signal::new());
+    spawner.spawn(connection(
+        settings.wifi_reconnect_time,
+        controller,
+        stop_signal.clone(),
+    ))?;
     spawner.spawn(sta_task(runner))?;
 
     Ok(WmReturn {
@@ -190,6 +195,8 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         sta_stack,
         data,
         ip_address: utils::wifi_wait_for_ip(&sta_stack).await,
+
+        stop_signal,
     })
 }
 
@@ -261,6 +268,7 @@ async fn wifi_connection_worker(
 async fn connection(
     wifi_reconnect_time: u64,
     mut controller: WifiController<'static>,
+    stop_signal: Rc<Signal<CriticalSectionRawMutex, bool>>,
     //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
 ) {
     log::info!("WIFI Device capabilities: {:?}", controller.capabilities());
@@ -268,7 +276,37 @@ async fn connection(
     loop {
         if esp_wifi::wifi::wifi_state() == WifiState::StaConnected {
             // wait until we're no longer connected
-            controller.wait_for_event(WifiEvent::StaDisconnected).await;
+            let res = embassy_futures::select::select(
+                controller.wait_for_event(WifiEvent::StaDisconnected),
+                stop_signal.wait(),
+            )
+            .await;
+
+            match res {
+                embassy_futures::select::Either::First(_) => {}
+                embassy_futures::select::Either::Second(val) => {
+                    if val {
+                        // TODO: maybe add error handling?
+                        _ = controller.disconnect_async().await;
+                        _ = controller.stop_async().await;
+                        log::info!("WIFI radio stopped!");
+
+                        loop {
+                            // wait for `restart_wifi()`
+                            let val = stop_signal.wait().await;
+                            if !val {
+                                break;
+                            }
+                        }
+
+                        _ = controller.start_async().await;
+                        log::info!("WIFI radio restarted!");
+                    } else {
+                        continue;
+                    }
+                }
+            }
+
             Timer::after(Duration::from_millis(wifi_reconnect_time)).await
         }
 

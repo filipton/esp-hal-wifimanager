@@ -1,9 +1,13 @@
 use core::str::FromStr;
 
+use alloc::rc::Rc;
 use embassy_executor::SpawnError;
 use embassy_net::Stack;
 use embassy_sync::{
-    blocking_mutex::raw::NoopRawMutex, mutex::Mutex, pubsub::PubSubChannel, signal::Signal,
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
+    mutex::Mutex,
+    pubsub::PubSubChannel,
+    signal::Signal,
 };
 use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiError},
@@ -142,6 +146,21 @@ pub struct WmReturn {
     pub sta_stack: Stack<'static>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],
+
+    pub(crate) stop_signal: Rc<Signal<CriticalSectionRawMutex, bool>>,
+}
+
+impl WmReturn {
+    // Disconnects from current wifi and stops wifi radio
+    pub fn stop_radio(&self) {
+        self.stop_signal.signal(true);
+    }
+
+    // Starts radio and reconnect to wifi
+    // You can only use it after `stop_radio()`
+    pub fn restart_radio(&self) {
+        self.stop_signal.signal(false);
+    }
 }
 
 impl ::core::fmt::Debug for WmReturn {
