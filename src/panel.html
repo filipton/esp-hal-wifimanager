@@ -1,54 +1,292 @@
-<html>
-
+<!DOCTYPE html>
+<html lang="en">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        #panel {
+        :root {
+            --primary-color: #2563eb;
+            --error-color: #dc2626;
+            --success-color: #16a34a;
+            --background-color: #f8fafc;
+            --card-background: #ffffff;
+            --text-color: #1e293b;
+            --border-color: #e2e8f0;
+            --hover-color: #f1f5f9;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            min-height: 100vh;
+            padding: clamp(1rem, 5vw, 2rem);
             display: flex;
-            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 90%;
+            background-color: var(--card-background);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            padding: clamp(1rem, 5vw, 2rem);
+        }
+
+        h1 {
+            font-size: clamp(1.5rem, 5vw, 1.875rem);
+            font-weight: bold;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        h2 {
+            font-size: clamp(1.125rem, 4vw, 1.25rem);
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+
+        .section {
+            margin-bottom: 2rem;
         }
 
         #list {
             display: flex;
             flex-direction: column;
+            gap: 0.5rem;
         }
 
-        #panel>input {
-            padding: 5px;
-            margin-bottom: 3px;
+        .network-item {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .network-item:hover {
+            background-color: var(--hover-color);
+        }
+
+        .network-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .wifi-icon {
+            color: var(--text-color);
+            opacity: 0.6;
+        }
+
+        .signal-strength {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .signal-bar {
+            width: 80px;
+            height: 8px;
+            background-color: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .signal-level {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #60a5fa);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        #panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        button[type="submit"] {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            width: 100%;
+        }
+
+        button[type="submit"]:hover {
+            background-color: #1d4ed8;
+        }
+
+        .notification {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            color: white;
+            max-width: 90%;
+            display: none;
+            animation: slideIn 0.3s ease-out;
+            z-index: 1000;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .notification.success {
+            background-color: var(--success-color);
+        }
+
+        .notification.error {
+            background-color: var(--error-color);
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .password-container {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .show-password {
+            margin-left: 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            background: none;
+            border: none;
         }
     </style>
 </head>
-
 <body>
-    <h1>Simple panel test:</h1>
+    <div class="container">
+        <h1>WiFi Setup</h1>
+        
+        <div class="section">
+            <h2>Available Networks</h2>
+            <div id="list"></div>
+        </div>
 
-    <h2>Network list:</h2>
-    <div id="list">
+        <div class="section">
+            <h2>WiFi Credentials</h2>
+            <form id="panel">
+                <input id="ssid" type="text" placeholder="Enter SSID..." />
+                <div class="password-container">
+                    <input id="psk" type="password" placeholder="Enter Password..." />
+                    <button type="button" class="show-password" id="togglePassword">👁️</button>
+                </div>
+                <button type="submit">Connect to Network</button>
+            </form>
+        </div>
     </div>
 
-    <br />
-    <h2>WIFI credentials:</h2>
-    <form id="panel">
-        <input id="ssid" type="text" placeholder="Enter SSID..." />
-        <input id="psk" type="password" placeholder="Enter PSK..." />
-        <br />
-
-        <input type="submit" value="Try To Connect" />
-    </form>
+    <div id="notification" class="notification">
+        <span id="notification-message"></span>
+    </div>
 
     <script>
+        const passwordInput = document.getElementById("psk");
+        const togglePasswordButton = document.getElementById("togglePassword");
+
+        togglePasswordButton.addEventListener("click", () => {
+            if (passwordInput.type === "password") {
+                passwordInput.type = "text";
+                togglePasswordButton.textContent = "🔒";
+            } else {
+                passwordInput.type = "password";
+                togglePasswordButton.textContent = "👁️";
+            }
+        });
+
         let connecting = false;
+        let connected = false;
         let listInterval;
 
+        function showNotification(message, type = 'success') {
+            const notification = document.getElementById('notification');
+            const messageEl = document.getElementById('notification-message');
+            
+            notification.className = 'notification ' + type;
+            messageEl.textContent = message;
+            notification.style.display = 'block';
+
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 5000);
+        }
+
+        document.getElementById("panel").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const ssid = document.getElementById("ssid").value;
+            const psk = document.getElementById("psk").value;
+
+            try {
+                let response = await fetch("/setup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ssid, psk })
+                });
+                let result = await response.json();
+                
+                if (result.success) {
+                    showNotification("Connection successful!", 'success');
+                    listFetchingEnabled = false;
+                } else {
+                    showNotification("Connection error!", 'error');
+                }
+            } catch (error) {
+                connectionMessage.textContent = "Connection error!";
+                connectionMessage.style.color = "red";
+            }
+        });
         const panel = document.querySelector("#panel");
         panel.addEventListener("submit", async (e) => {
             e.preventDefault();
-
             let json = JSON.stringify({
                 ssid: document.querySelector("#ssid").value,
                 psk: document.querySelector("#psk").value
             });
-
             try {
                 connecting = true;
                 let res = await fetch("/setup", {
@@ -56,14 +294,23 @@
                     headers: {"Content-Type": "application/json"},
                     body: json
                 });
+                const responseText = await res.text();
+                let success = responseText.toLowerCase().includes("true");
                 connecting = false;
-
-                if(listInterval) {
-                    clearInterval(listInterval);
+                
+                if (success) {
+                    showNotification("Connection successful!", 'success');
+                    connected = true;
+                    if (listInterval) {
+                        clearInterval(listInterval);
+                        listInterval = null;
+                    }
+                } else {
+                    showNotification("Connection error!", 'error');
                 }
-                alert("Connect state: " + await res.text());
             } catch (e) {
-                alert(`Fetch err: ${e}`);
+                connecting = false;
+                showNotification(`Connection error: ${e}`, 'error');
             }
         });
 
@@ -72,35 +319,55 @@
         }
 
         async function getApList() {
-            if (connecting) return;
-
+            if (connecting || connected) return;
             try {
                 let res = await fetch("/list");
                 let text = await res.text();
                 showApList(text);
             } catch (e) {
-                alert(`List fetch err: ${e}`);
+                if (connecting || connected) return;
+                showNotification(`Failed to fetch networks: ${e}`, 'error');
             }
         }
 
         function showApList(res) {
-            document.querySelector('#list').innerHTML = "";
-
+            const listEl = document.querySelector('#list');
+            listEl.innerHTML = "";
             let wifis = res.split("\n");
+            
             for (let wifi of wifis) {
                 let split = wifi.split(": ");
                 if (split.length != 2) continue;
-
                 let ssid = split[0];
-                let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100)
-
-                document.querySelector('#list').innerHTML += `<span style="cursor: pointer;" onclick="selectSSID('${ssid}')">${ssid} | ${power}%</span> <br />`;
+                let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100);
+                
+                const networkItem = document.createElement('div');
+                networkItem.className = 'network-item';
+                networkItem.onclick = () => selectSSID(ssid);
+                
+                networkItem.innerHTML = `
+                    <div class="network-info">
+                        <svg class="wifi-icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
+                        </svg>
+                        <span>${ssid}</span>
+                    </div>
+                    <div class="signal-strength">
+                        <span>${power}%</span>
+                        <div class="signal-bar">
+                            <div class="signal-level" style="width: ${power}%"></div>
+                        </div>
+                    </div>
+                `;
+                
+                listEl.appendChild(networkItem);
             }
         }
 
-        listInverval = setInterval(getApList, 15000);
-        getApList();
+        if (!connected) {
+            listInterval = setInterval(getApList, 15000);
+            getApList();
+        }
     </script>
 </body>
-
 </html>

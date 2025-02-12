@@ -150,6 +150,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         let wifi_setup =
             wifi_connection_worker(settings.clone(), wm_signals, nvs, &mut controller).await?;
 
+        Timer::after_millis(1000).await;
         _ = controller.stop_async().await;
         drop(sta_interface);
         drop(controller);
