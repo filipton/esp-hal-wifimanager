@@ -22,7 +22,7 @@ use esp_hal::{
 };
 use esp_wifi::EspWifiController;
 use esp_wifi::{
-    wifi::{WifiController, WifiDevice, WifiEvent, WifiStaDevice, WifiState},
+    wifi::{WifiController, WifiDevice, WifiEvent, WifiState},
     EspWifiTimerSource,
 };
 use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
@@ -73,9 +73,13 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         esp_wifi::init(timer, rng.clone(), radio_clocks)?
     );
 
-    let (sta_interface, mut controller) =
-        esp_wifi::wifi::new_with_mode(&init, unsafe { wifi.clone_unchecked() }, WifiStaDevice)?;
+    let (mut controller, interfaces) =
+        esp_wifi::wifi::new(&init, unsafe { wifi.clone_unchecked() })?;
 
+    controller.set_configuration(&esp_wifi::wifi::Configuration::Mixed(
+        Default::default(),
+        Default::default(),
+    ))?;
     controller.start_async().await?;
 
     let mut wifi_setup = [0; 1024];
@@ -107,7 +111,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
                 .expect("Shouldnt fail if connected i guesss.")
                 .data,
             init,
-            sta_interface,
+            interfaces.sta,
             controller,
         )
     } else {
@@ -118,7 +122,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         }
 
         _ = controller.stop_async().await;
-        drop(sta_interface);
+        drop(interfaces);
         drop(controller);
 
         let wm_signals = Rc::new(WmInnerSignals::new());
@@ -155,8 +159,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         drop(sta_interface);
         drop(controller);
 
-        let (sta_interface, mut controller) =
-            esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice)?;
+        let (mut controller, interfaces) = esp_wifi::wifi::new(&init, wifi)?;
 
         controller.start_async().await?;
         controller.set_configuration(&wifi_setup.to_client_conf()?)?;
@@ -164,10 +167,10 @@ pub async fn init_wm<T: EspWifiTimerSource>(
         if settings.esp_restart_after_connection {
             log::info!("Wifimanager reset after succesfull first connection...");
             Timer::after_millis(1000).await;
-            esp_hal::reset::software_reset();
+            esp_hal::system::software_reset();
         }
 
-        (wifi_setup.data, init, sta_interface, controller)
+        (wifi_setup.data, init, interfaces.sta, controller)
     };
 
     let sta_config = Config::dhcpv4(Default::default());
@@ -257,7 +260,7 @@ async fn wifi_connection_worker(
             if start_time.elapsed().as_millis() >= reset_timeout {
                 log::info!("Wifimanager esp reset timeout reached! Resetting..");
                 Timer::after_millis(1000).await;
-                esp_hal::reset::software_reset();
+                esp_hal::system::software_reset();
             }
         }
 
@@ -324,6 +327,6 @@ async fn connection(
 }
 
 #[embassy_executor::task]
-async fn sta_task(mut runner: Runner<'static, WifiDevice<'static, WifiStaDevice>>) {
+async fn sta_task(mut runner: Runner<'static, WifiDevice<'static>>) {
     runner.run().await
 }

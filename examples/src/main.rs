@@ -21,7 +21,7 @@ macro_rules! make_static {
 
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
-    esp_alloc::heap_allocator!(150 * 1024);
+    esp_alloc::heap_allocator!(size: 150 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     /*
@@ -69,7 +69,7 @@ async fn main(spawner: Spawner) {
 
     loop {
         //rtc.rwdt.feed();
-        log::info!("bump {}", esp_hal::time::now());
+        log::info!("bump {}", esp_hal::time::Instant::now());
         Timer::after_millis(15000).await;
     }
 }

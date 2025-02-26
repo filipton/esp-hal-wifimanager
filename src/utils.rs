@@ -4,7 +4,7 @@ use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_wifi::{
-    wifi::{WifiController, WifiDevice, WifiStaDevice},
+    wifi::{WifiController, WifiDevice},
     EspWifiController,
 };
 use heapless::String;
@@ -21,7 +21,7 @@ pub async fn spawn_ap_controller(
     spawner: &Spawner,
     wm_signals: Rc<WmInnerSignals>,
     settings: WmSettings,
-) -> Result<(WifiDevice<'static, WifiStaDevice>, WifiController<'static>)> {
+) -> Result<(WifiDevice<'static>, WifiController<'static>)> {
     let ap_config = esp_wifi::wifi::AccessPointConfiguration {
         ssid: generated_ssid,
         ..Default::default()
@@ -33,11 +33,10 @@ pub async fn spawn_ap_controller(
         dns_servers: Default::default(),
     });
 
-    let (ap_interface, sta_interface, controller) =
-        esp_wifi::wifi::new_ap_sta_with_config(init, wifi, Default::default(), ap_config)?;
+    let (mut controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
 
     let (ap_stack, ap_runner) = embassy_net::new(
-        ap_interface,
+        interfaces.ap,
         ap_ip_config,
         {
             static STATIC_CELL: static_cell::StaticCell<StackResources<6>> =
@@ -47,6 +46,7 @@ pub async fn spawn_ap_controller(
         rng.random() as u64,
     );
 
+    controller.set_configuration(&esp_wifi::wifi::Configuration::AccessPoint(ap_config))?;
     spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
     spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
     crate::http::run_http_server(
@@ -57,7 +57,7 @@ pub async fn spawn_ap_controller(
     )
     .await;
 
-    Ok((sta_interface, controller))
+    Ok((interfaces.sta, controller))
 }
 
 #[cfg(not(feature = "ap"))]
@@ -69,11 +69,10 @@ pub async fn spawn_ap_controller(
     _spawner: &Spawner,
     _wm_signals: Rc<WmInnerSignals>,
     _settings: WmSettings,
-) -> Result<(WifiDevice<'static, WifiStaDevice>, WifiController<'static>)> {
-    let (sta_interface, controller) =
-        esp_wifi::wifi::new_with_config(init, wifi, Default::default())?;
+) -> Result<(WifiDevice<'static>, WifiController<'static>)> {
+    let (controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
 
-    Ok((sta_interface, controller))
+    Ok((interfaces.ap, controller))
 }
 
 pub async fn try_to_wifi_connect(

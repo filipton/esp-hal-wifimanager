@@ -36,7 +36,12 @@ pub async fn bluetooth_task(
 
     let connector = BleConnector::new(&init, &mut bt);
 
-    let now = || esp_hal::time::now().duration_since_epoch().to_millis();
+    let now = || {
+        esp_hal::time::Instant::now()
+            .duration_since_epoch()
+            .as_millis()
+    };
+
     let mut ble = Ble::new(connector, now);
     loop {
         _ = ble.init().await;

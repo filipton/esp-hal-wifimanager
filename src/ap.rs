@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use embassy_net::{Runner, Stack};
 use embassy_time::Duration;
-use esp_wifi::wifi::{WifiApDevice, WifiDevice};
+use esp_wifi::wifi::WifiDevice;
 
 use crate::structs::WmInnerSignals;
 #[embassy_executor::task]
@@ -22,7 +22,7 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>) {
         &mut leaser,
     )
     .await;
-    
+
     if let Err(e) = res {
         log::error!("run_dhcp_server failed! ({e:?})");
     }
@@ -30,7 +30,7 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>) {
 
 #[embassy_executor::task]
 pub async fn ap_task(
-    mut runner: Runner<'static, WifiDevice<'static, WifiApDevice>>,
+    mut runner: Runner<'static, WifiDevice<'static>>,
     signals: Rc<WmInnerSignals>,
 ) {
     embassy_futures::select::select(runner.run(), signals.end_signalled()).await;
