@@ -34,20 +34,21 @@ serde_json = { version = "1.0.139", default-features = false, features = ["alloc
 embedded-io-async = "0.6.1"
 portable-atomic = { version = "1.11.0", default-features = false }
 picoserve = { version = "0.15.0", optional = true, features = ["alloc", "embassy"] }
+esp-wifi-sys = "0.7.1"
 
 [features]
 #default = []
 #default = ["esp32s3", "ap", "ble"]
 default = ["esp32s3", "ap", "ble"]
 
-esp32s2 = ["esp-hal/esp32s2","esp-wifi/esp32s2","esp-hal-embassy/esp32s2","esp-storage/esp32s2"]
-esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-storage/esp32s3"]
+esp32s2 = ["esp-hal/esp32s2","esp-wifi/esp32s2","esp-hal-embassy/esp32s2","esp-storage/esp32s2","esp-wifi-sys/esp32s2"]
+esp32s3 = ["esp-hal/esp32s3","esp-wifi/esp32s3","esp-hal-embassy/esp32s3","esp-storage/esp32s3","esp-wifi-sys/esp32s3"]
 
-esp32c2 = ["esp-hal/esp32c2","esp-wifi/esp32c2","esp-hal-embassy/esp32c2","esp-storage/esp32c2"]
-esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3"]
-esp32c6 = ["esp-hal/esp32c6","esp-wifi/esp32c6","esp-hal-embassy/esp32c6","esp-storage/esp32c6"]
+esp32c2 = ["esp-hal/esp32c2","esp-wifi/esp32c2","esp-hal-embassy/esp32c2","esp-storage/esp32c2","esp-wifi-sys/esp32c3"]
+esp32c3 = ["esp-hal/esp32c3","esp-wifi/esp32c3","esp-hal-embassy/esp32c3","esp-storage/esp32c3","esp-wifi-sys/esp32c3"]
+esp32c6 = ["esp-hal/esp32c6","esp-wifi/esp32c6","esp-hal-embassy/esp32c6","esp-storage/esp32c6","esp-wifi-sys/esp32c6"]
 
-esp32 = ["esp-hal/esp32","esp-wifi/esp32","esp-hal-embassy/esp32","esp-storage/esp32"]
+esp32 = ["esp-hal/esp32","esp-wifi/esp32","esp-hal-embassy/esp32","esp-storage/esp32","esp-wifi-sys/esp32"]
 
 ap = ["dep:esp-hal-dhcp-server", "dep:picoserve"]
 ble = ["dep:bleps", "esp-wifi/ble", "esp-wifi/coex"]

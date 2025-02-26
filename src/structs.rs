@@ -105,12 +105,16 @@ pub(crate) struct AutoSetupSettings {
 }
 
 impl AutoSetupSettings {
-    pub fn to_client_conf(&self) -> Result<Configuration> {
-        Ok(Configuration::Client(ClientConfiguration {
+    pub fn to_configuration(&self) -> Result<Configuration> {
+        Ok(Configuration::Client(self.to_client_conf()?))
+    }
+
+    pub fn to_client_conf(&self) -> Result<ClientConfiguration> {
+        Ok(ClientConfiguration {
             ssid: String::from_str(&self.ssid)?,
             password: String::from_str(&self.psk)?,
             ..Default::default()
-        }))
+        })
     }
 }
 

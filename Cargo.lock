@@ -637,6 +637,7 @@ dependencies = [
  "esp-hal-embassy",
  "esp-storage",
  "esp-wifi",
+ "esp-wifi-sys",
  "heapless",
  "log",
  "picoserve",

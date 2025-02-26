@@ -3,29 +3,26 @@ use alloc::rc::Rc;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_wifi::{
-    wifi::{WifiController, WifiDevice},
-    EspWifiController,
+use esp_wifi::wifi::{
+    AuthMethod, ClientConfiguration, InternalWifiError, WifiController, WifiDevice, WifiError,
 };
-use heapless::String;
+use esp_wifi_sys::include::{
+    __BindgenBitfieldUnit, esp_err_to_name, esp_wifi_set_config, wifi_auth_mode_t, wifi_config_t,
+    wifi_interface_t_WIFI_IF_STA, wifi_pmf_config_t, wifi_scan_threshold_t,
+    wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL, wifi_sta_config_t,
+};
 
 #[cfg(feature = "ap")]
 use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
 
 #[cfg(feature = "ap")]
-pub async fn spawn_ap_controller(
-    generated_ssid: String<32>,
-    init: &'static EspWifiController<'static>,
-    wifi: esp_hal::peripherals::WIFI,
+pub async fn spawn_ap(
     rng: &mut esp_hal::rng::Rng,
     spawner: &Spawner,
     wm_signals: Rc<WmInnerSignals>,
     settings: WmSettings,
-) -> Result<(WifiDevice<'static>, WifiController<'static>)> {
-    let ap_config = esp_wifi::wifi::AccessPointConfiguration {
-        ssid: generated_ssid,
-        ..Default::default()
-    };
+    ap_interface: WifiDevice<'static>,
+) -> Result<()> {
     let ap_ip = embassy_net::Ipv4Address::new(192, 168, 4, 1);
     let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
         address: Ipv4Cidr::new(ap_ip, 24),
@@ -33,10 +30,8 @@ pub async fn spawn_ap_controller(
         dns_servers: Default::default(),
     });
 
-    let (mut controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
-
     let (ap_stack, ap_runner) = embassy_net::new(
-        interfaces.ap,
+        ap_interface,
         ap_ip_config,
         {
             static STATIC_CELL: static_cell::StaticCell<StackResources<6>> =
@@ -46,7 +41,6 @@ pub async fn spawn_ap_controller(
         rng.random() as u64,
     );
 
-    controller.set_configuration(&esp_wifi::wifi::Configuration::AccessPoint(ap_config))?;
     spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
     spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
     crate::http::run_http_server(
@@ -57,22 +51,7 @@ pub async fn spawn_ap_controller(
     )
     .await;
 
-    Ok((interfaces.sta, controller))
-}
-
-#[cfg(not(feature = "ap"))]
-pub async fn spawn_ap_controller(
-    _generated_ssid: String<32>,
-    init: &'static EspWifiController<'static>,
-    wifi: esp_hal::peripherals::WIFI,
-    _rng: &mut esp_hal::rng::Rng,
-    _spawner: &Spawner,
-    _wm_signals: Rc<WmInnerSignals>,
-    _settings: WmSettings,
-) -> Result<(WifiDevice<'static>, WifiController<'static>)> {
-    let (controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
-
-    Ok((interfaces.ap, controller))
+    Ok(())
 }
 
 pub async fn try_to_wifi_connect(
@@ -137,4 +116,76 @@ pub fn get_efuse_mac() -> u64 {
     esp_hal::efuse::Efuse::mac_address()
         .iter()
         .fold(0u64, |acc, &x| (acc << 8) + x as u64)
+}
+
+fn to_raw(auth_method: &AuthMethod) -> wifi_auth_mode_t {
+    match auth_method {
+        AuthMethod::None => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_OPEN,
+        AuthMethod::WEP => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WEP,
+        AuthMethod::WPA => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA_PSK,
+        AuthMethod::WPA2Personal => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA2_PSK,
+        AuthMethod::WPAWPA2Personal => {
+            esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA_WPA2_PSK
+        }
+        AuthMethod::WPA2Enterprise => {
+            esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA2_ENTERPRISE
+        }
+        AuthMethod::WPA3Personal => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA3_PSK,
+        AuthMethod::WPA2WPA3Personal => {
+            esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WPA2_WPA3_PSK
+        }
+        AuthMethod::WAPIPersonal => esp_wifi_sys::include::wifi_auth_mode_t_WIFI_AUTH_WAPI_PSK,
+    }
+}
+
+pub fn apply_sta_config(config: &ClientConfiguration) -> core::result::Result<(), WifiError> {
+    let mut cfg = wifi_config_t {
+        sta: wifi_sta_config_t {
+            ssid: [0; 32],
+            password: [0; 64],
+            scan_method: 1,
+            bssid_set: config.bssid.is_some(),
+            bssid: config.bssid.unwrap_or_default(),
+            channel: config.channel.unwrap_or(0),
+            listen_interval: 3,
+            sort_method: wifi_sort_method_t_WIFI_CONNECT_AP_BY_SIGNAL,
+            threshold: wifi_scan_threshold_t {
+                rssi: -99,
+                authmode: to_raw(&config.auth_method),
+            },
+            pmf_cfg: wifi_pmf_config_t {
+                capable: true,
+                required: false,
+            },
+            sae_pwe_h2e: 3,
+            _bitfield_align_1: [0; 0],
+            _bitfield_1: __BindgenBitfieldUnit::new([0; 4]),
+            failure_retry_cnt: 1,
+            _bitfield_align_2: [0; 0],
+            _bitfield_2: __BindgenBitfieldUnit::new([0; 4]),
+            sae_pk_mode: 0, // ??
+            sae_h2e_identifier: [0; 32],
+        },
+    };
+
+    if config.auth_method == AuthMethod::None && !config.password.is_empty() {
+        return Err(WifiError::InternalError(
+            InternalWifiError::EspErrInvalidArg,
+        ));
+    }
+
+    unsafe {
+        cfg.sta.ssid[0..(config.ssid.len())].copy_from_slice(config.ssid.as_bytes());
+        cfg.sta.password[0..(config.password.len())].copy_from_slice(config.password.as_bytes());
+
+        let res = esp_wifi_set_config(wifi_interface_t_WIFI_IF_STA, &mut cfg);
+        if res == 0 {
+            return Ok(());
+        }
+
+        //esp_err_to_name(res);
+        return Err(WifiError::InternalError(
+            InternalWifiError::EspErrInvalidArg,
+        ));
+    }
 }
