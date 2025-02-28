@@ -74,6 +74,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     );
 
     let (mut controller, interfaces) = esp_wifi::wifi::new(&init, wifi)?;
+    controller.set_power_saving(esp_wifi::config::PowerSaveMode::None)?;
 
     let mut wifi_setup = [0; 1024];
     let wifi_setup = match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
@@ -112,6 +113,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
             ap_start_signal.signal(());
         }
 
+        #[cfg(feature = "ap")]
         let configuration = esp_wifi::wifi::Configuration::Mixed(
             Default::default(),
             esp_wifi::wifi::AccessPointConfiguration {
@@ -120,9 +122,12 @@ pub async fn init_wm<T: EspWifiTimerSource>(
             },
         );
 
-        //let configuration = esp_wifi::wifi::Configuration::Client(Default::default());
+        #[cfg(not(feature = "ap"))]
+        let configuration = esp_wifi::wifi::Configuration::Client(Default::default());
 
         controller.set_configuration(&configuration)?;
+
+        #[cfg(feature = "ap")]
         utils::spawn_ap(
             &mut rng,
             &spawner,
@@ -210,14 +215,17 @@ async fn wifi_connection_worker(
             let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf)?;
 
             log::warn!("trying to connect to: {:?}", setup_info);
+            #[cfg(feature = "ap")]
+            {
+                *configuration.as_mixed_conf_mut().0 = setup_info.to_client_conf()?;
+            }
 
-            log::warn!("conf: {configuration:?}");
-            //*configuration.as_mixed_conf_mut().0 = setup_info.to_client_conf()?;
-            //*configuration.as_client_conf_mut() = setup_info.to_client_conf()?;
-            //controller.set_configuration(&configuration)?;
-            log::warn!("conf: {configuration:?}");
-            //controller.set_mode(esp_wifi::wifi::WifiMode::ApSta)?;
-            crate::utils::apply_sta_config(&setup_info.to_client_conf()?)?;
+            #[cfg(not(feature = "ap"))]
+            {
+                *configuration.as_client_conf_mut() = setup_info.to_client_conf()?;
+            }
+
+            controller.set_configuration(&configuration)?;
 
             let wifi_connected =
                 utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await;

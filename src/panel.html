@@ -185,6 +185,51 @@
             }
         }
 
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(2px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background-color: var(--card-background);
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            max-width: 90%;
+            width: 400px;
+            position: relative;
+        }
+
+        .modal-content {
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        .modal-close {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            width: 100%;
+        }
+
+        .modal-close:hover {
+            background-color: #1d4ed8;
+        }
+
         .password-container {
             position: relative;
             display: flex;
@@ -221,8 +266,11 @@
         </div>
     </div>
 
-    <div id="notification" class="notification">
-        <span id="notification-message"></span>
+    <div id="modal-overlay" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-content" id="modal-message"></div>
+            <button class="modal-close" id="modal-close">Close</button>
+        </div>
     </div>
 
     <script>
@@ -243,18 +291,20 @@
         let connected = false;
         let listInterval;
 
-        function showNotification(message, type = 'success') {
-            const notification = document.getElementById('notification');
-            const messageEl = document.getElementById('notification-message');
+        function showModal(message) {
+            const modalOverlay = document.getElementById('modal-overlay');
+            const modalMessage = document.getElementById('modal-message');
             
-            notification.className = 'notification ' + type;
-            messageEl.textContent = message;
-            notification.style.display = 'block';
-
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 5000);
+            modalMessage.textContent = message;
+            modalOverlay.style.display = 'flex';
         }
+
+        function hideModal() {
+            const modalOverlay = document.getElementById('modal-overlay');
+            modalOverlay.style.display = 'none';
+        }
+
+        document.getElementById('modal-close').addEventListener('click', hideModal);
 
         document.getElementById("panel").addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -267,19 +317,10 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ ssid, psk })
                 });
-                let result = await response.json();
-                
-                if (result.success) {
-                    showNotification("Connection successful!", 'success');
-                    listFetchingEnabled = false;
-                } else {
-                    showNotification("Connection error!", 'error');
-                }
             } catch (error) {
-                connectionMessage.textContent = "Connection error!";
-                connectionMessage.style.color = "red";
             }
         });
+
         const panel = document.querySelector("#panel");
         panel.addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -294,23 +335,29 @@
                     headers: {"Content-Type": "application/json"},
                     body: json
                 });
-                const responseText = await res.text();
-                let success = responseText.toLowerCase().includes("true");
                 connecting = false;
                 
-                if (success) {
-                    showNotification("Connection successful!", 'success');
-                    connected = true;
-                    if (listInterval) {
-                        clearInterval(listInterval);
-                        listInterval = null;
-                    }
-                } else {
-                    showNotification("Connection error!", 'error');
+                // Stop the AP list interval
+                if (listInterval) {
+                    clearInterval(listInterval);
+                    listInterval = null;
                 }
+                
+                // Show modal with reconnect instructions
+                showModal(
+                    "WiFi credentials sent successfully! Please reconnect to your access point after 10-15 seconds if the WiFi isn't connected."
+                );
             } catch (e) {
                 connecting = false;
-                showNotification(`Connection error: ${e}`, 'error');
+                // Stop the AP list interval
+                if (listInterval) {
+                    clearInterval(listInterval);
+                    listInterval = null;
+                }
+                // Show modal even if there's an error
+                showModal(
+                    "WiFi credentials sent successfully! Please reconnect to your access point after 10-15 seconds if the WiFi isn't connected."
+                );
             }
         });
 
@@ -326,7 +373,6 @@
                 showApList(text);
             } catch (e) {
                 if (connecting || connected) return;
-                showNotification(`Failed to fetch networks: ${e}`, 'error');
             }
         }
 
