@@ -92,10 +92,12 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     };
 
     let mut wifi_connected = false;
+    let mut controller_started = false;
     if let Some(ref wifi_setup) = wifi_setup {
         log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
         controller.set_configuration(&wifi_setup.to_configuration()?)?;
         controller.start_async().await?;
+        controller_started = true;
 
         wifi_connected =
             utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
@@ -150,7 +152,10 @@ pub async fn init_wm<T: EspWifiTimerSource>(
             wm_signals.clone(),
         ))?;
 
-        controller.start_async().await?;
+        if !controller_started {
+            controller.start_async().await?;
+        }
+
         let wifi_setup = wifi_connection_worker(
             settings.clone(),
             wm_signals,
