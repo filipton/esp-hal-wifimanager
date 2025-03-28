@@ -238,6 +238,7 @@ async fn wifi_connection_worker(
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
 
             if wifi_connected {
+                _ = nvs.invalidate_key(&WIFI_NVS_KEY).await;
                 nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
 
                 #[cfg(feature = "ap")]
