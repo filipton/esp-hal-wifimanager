@@ -10,14 +10,16 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>) {
         esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 100),
     );
 
+    let ip = esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 1);
     let res = esp_hal_dhcp_server::run_dhcp_server(
         ap_stack,
         esp_hal_dhcp_server::structs::DhcpServerConfig {
-            ip: esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 1),
+            ip,
             lease_time: Duration::from_secs(3600),
-            gateways: &[],
+            gateways: &[ip],
             subnet: None,
-            dns: &[],
+            dns: &[ip],
+            use_captive_portal: true,
         },
         &mut leaser,
     )
