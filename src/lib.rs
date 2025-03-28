@@ -58,7 +58,7 @@ macro_rules! mk_static {
 pub async fn init_wm<T: EspWifiTimerSource>(
     settings: WmSettings,
     spawner: &Spawner,
-    nvs: &Nvs,
+    nvs: Option<&Nvs>,
     mut rng: Rng,
     timer: impl Peripheral<P = T> + 'static,
     radio_clocks: RADIO_CLK,
@@ -77,18 +77,22 @@ pub async fn init_wm<T: EspWifiTimerSource>(
     controller.set_power_saving(esp_wifi::config::PowerSaveMode::None)?;
 
     let mut wifi_setup = [0; 1024];
-    let wifi_setup = match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
-        Ok(_) => {
-            let end_pos = wifi_setup
-                .iter()
-                .position(|&x| x == 0x00)
-                .unwrap_or(wifi_setup.len());
+    let wifi_setup = if let Some(nvs) = nvs {
+        match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
+            Ok(_) => {
+                let end_pos = wifi_setup
+                    .iter()
+                    .position(|&x| x == 0x00)
+                    .unwrap_or(wifi_setup.len());
 
-            Some(serde_json::from_slice::<AutoSetupSettings>(
-                &wifi_setup[..end_pos],
-            )?)
+                Some(serde_json::from_slice::<AutoSetupSettings>(
+                    &wifi_setup[..end_pos],
+                )?)
+            }
+            Err(_) => None,
         }
-        Err(_) => None,
+    } else {
+        None
     };
 
     let mut wifi_connected = false;
@@ -208,7 +212,7 @@ pub async fn init_wm<T: EspWifiTimerSource>(
 async fn wifi_connection_worker(
     settings: WmSettings,
     wm_signals: Rc<WmInnerSignals>,
-    nvs: &Nvs,
+    nvs: Option<&Nvs>,
     controller: &mut WifiController<'static>,
     mut configuration: esp_wifi::wifi::Configuration,
 ) -> Result<AutoSetupSettings> {
@@ -238,8 +242,10 @@ async fn wifi_connection_worker(
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
 
             if wifi_connected {
-                _ = nvs.invalidate_key(&WIFI_NVS_KEY).await;
-                nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
+                if let Some(nvs) = nvs {
+                    _ = nvs.invalidate_key(&WIFI_NVS_KEY).await;
+                    nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
+                }
 
                 #[cfg(feature = "ap")]
                 esp_hal_dhcp_server::dhcp_close();

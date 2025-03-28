@@ -55,7 +55,7 @@ async fn main(spawner: Spawner) {
     let wifi_res = esp_hal_wifimanager::init_wm(
         wm_settings,
         &spawner,
-        &nvs,
+        Some(&nvs),
         rng.clone(),
         timg0.timer0,
         peripherals.RADIO_CLK,
