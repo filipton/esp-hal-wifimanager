@@ -118,11 +118,11 @@ impl AutoSetupSettings {
     }
 }
 
-impl WmSettings {
+impl Default for WmSettings {
     /// Defaults for esp32 (with defaut partition schema)
     ///
     /// Checked on esp32s3 and esp32c3
-    pub fn default() -> Self {
+    fn default() -> Self {
         Self {
             ssid: {
                 let mut generated_name = heapless::String::<32>::new();
