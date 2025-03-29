@@ -1,10 +1,10 @@
-use crate::structs::{AutoSetupSettings, WmInnerSignals};
-use alloc::rc::Rc;
+use crate::structs::WmInnerSignals;
+use alloc::{rc::Rc, vec::Vec};
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::Duration;
 use picoserve::{
-    extract::{Json, State},
+    extract::{FromRequest, State},
     routing::{get, get_service, post},
     AppRouter, AppWithStateBuilder,
 };
@@ -18,6 +18,21 @@ struct AppState {
 
 struct AppProps {
     wifi_panel_str: &'static str,
+}
+
+struct Bytes(Vec<u8>);
+impl<'r, State> FromRequest<'r, State> for Bytes {
+    type Rejection = ();
+
+    async fn from_request<R: picoserve::io::Read>(
+        _state: &'r State,
+        _request_parts: picoserve::request::RequestParts<'r>,
+        request_body: picoserve::request::RequestBody<'r, R>,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(Bytes(
+            request_body.read_all().await.map_err(|_| ())?.to_vec(),
+        ))
+    }
 }
 
 impl AppWithStateBuilder for AppProps {
@@ -44,14 +59,13 @@ impl AppWithStateBuilder for AppProps {
             )
             .route(
                 "/setup",
-                post(|State(app_state): State<AppState>, Json(setup): Json<AutoSetupSettings>| async move {
-                    app_state.signals
-                        .wifi_conn_info_sig
-                        .signal(serde_json::to_vec(&setup).expect("Shouldnt error?"));
-
-                    let wifi_connected = app_state.signals.wifi_conn_res_sig.wait().await;
-                    alloc::format!("{}", wifi_connected)
-                }),
+                post(
+                    |State(app_state): State<AppState>, Bytes(bytes): Bytes| async move {
+                        app_state.signals.wifi_conn_info_sig.signal(bytes);
+                        let wifi_connected = app_state.signals.wifi_conn_res_sig.wait().await;
+                        alloc::format!("{}", wifi_connected)
+                    },
+                ),
             )
     }
 }
