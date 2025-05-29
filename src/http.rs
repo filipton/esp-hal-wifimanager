@@ -115,6 +115,7 @@ pub async fn run_http_server(
         picoserve::Config<Duration>,
         picoserve::Config::new(picoserve::Timeouts {
             start_read_request: Some(Duration::from_secs(1)),
+            persistent_start_read_request: Some(Duration::from_secs(1)),
             read_request: Some(Duration::from_secs(1)),
             write: Some(Duration::from_secs(1)),
         })
