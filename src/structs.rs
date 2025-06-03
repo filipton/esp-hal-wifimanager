@@ -1,6 +1,6 @@
 use core::str::FromStr;
 
-use alloc::rc::Rc;
+use alloc::{rc::Rc, string::String};
 use embassy_executor::SpawnError;
 use embassy_net::Stack;
 use embassy_sync::{
@@ -13,7 +13,6 @@ use esp_wifi::{
     wifi::{ClientConfiguration, Configuration, WifiError},
     EspWifiController, InitializationError,
 };
-use heapless::String;
 use serde::{Deserialize, Serialize};
 
 use crate::get_efuse_mac;
@@ -72,10 +71,16 @@ impl From<()> for WmError {
     }
 }
 
+impl From<core::convert::Infallible> for WmError {
+    fn from(_value: core::convert::Infallible) -> Self {
+        Self::Other
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WmSettings {
     /// SSID and ble name
-    pub ssid: heapless::String<32>,
+    pub ssid: String,
 
     /// Panel hosted on AP (html)
     /// TODO: Make this as dictionary so, you will be able to upload more files
@@ -99,8 +104,8 @@ pub struct WmSettings {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub(crate) struct AutoSetupSettings {
-    pub ssid: alloc::string::String,
-    pub psk: alloc::string::String,
+    pub ssid: String,
+    pub psk: String,
     pub data: Option<serde_json::Value>,
 }
 
@@ -124,15 +129,7 @@ impl Default for WmSettings {
     /// Checked on esp32s3 and esp32c3
     fn default() -> Self {
         Self {
-            ssid: {
-                let mut generated_name = heapless::String::<32>::new();
-                _ = core::fmt::write(
-                    &mut generated_name,
-                    format_args!("ESP-{:X}", get_efuse_mac()),
-                );
-
-                generated_name
-            },
+            ssid: alloc::format!("ESP-{:X}", get_efuse_mac()),
             wifi_panel: include_str!("./panel.html"),
 
             wifi_reconnect_time: 1000,

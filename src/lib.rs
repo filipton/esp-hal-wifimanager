@@ -15,7 +15,6 @@ use embassy_net::{Config, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::peripheral::Peripheral;
 use esp_hal::{
     peripherals::{RADIO_CLK, WIFI},
     rng::Rng,
@@ -55,15 +54,15 @@ macro_rules! mk_static {
     }};
 }
 
-pub async fn init_wm<T: EspWifiTimerSource>(
+pub async fn init_wm(
     settings: WmSettings,
     spawner: &Spawner,
     nvs: Option<&Nvs>,
     mut rng: Rng,
-    timer: impl Peripheral<P = T> + 'static,
-    radio_clocks: RADIO_CLK,
-    wifi: WIFI,
-    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT,
+    timer: impl EspWifiTimerSource + 'static,
+    radio_clocks: RADIO_CLK<'static>,
+    wifi: WIFI<'static>,
+    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
     ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
 ) -> Result<WmReturn> {
     let generated_ssid = settings.ssid.clone();
@@ -257,13 +256,10 @@ async fn wifi_connection_worker(
         }
 
         if last_scan.elapsed().as_millis() >= settings.wifi_scan_interval {
-            let scan_res = controller
-                .scan_with_config_async::<15>(Default::default())
-                .await;
-
+            let scan_res = controller.scan_with_config_async(Default::default()).await;
             let mut wifis = wm_signals.wifi_scan_res.lock().await;
             wifis.clear();
-            if let Ok((aps, _count)) = scan_res {
+            if let Ok(aps) = scan_res {
                 for ap in aps {
                     _ = core::fmt::write(
                         wifis.deref_mut(),

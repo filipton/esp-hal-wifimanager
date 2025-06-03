@@ -2,25 +2,25 @@
 name = "wifimanager-example"
 version = "0.1.0"
 authors = ["filipton <filipton12@gmail.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-esp-backtrace = { version = "0.15.1", features = [ "esp32s3", "exception-handler", "panic-handler", "println" ] }
-esp-hal = { version = "1.0.0-beta.0", features = [ "esp32s3", "unstable" ] }
-esp-println = { version = "0.13.1", features = ["esp32s3", "log"] }
+esp-backtrace = { version = "0.16.0", features = [ "esp32s3", "exception-handler", "panic-handler", "println" ] }
+esp-hal = { version = "1.0.0-beta.1", features = [ "esp32s3", "unstable" ] }
+esp-println = { version = "0.14.0", features = ["esp32s3", "log-04"] }
 log = { version = "0.4.27" }
-esp-wifi = { version = "0.13.0", features = [ "esp32s3", "coex", "builtin-scheduler", "esp-alloc", "log" ] }
-esp-hal-embassy = { version = "0.7.0", features = ["esp32s3"] }
+esp-wifi = { version = "0.14.0", features = [ "esp32s3", "coex", "builtin-scheduler", "esp-alloc" ] }
+esp-hal-embassy = { version = "0.8.0", features = ["esp32s3"] }
 embassy-executor = { version = "0.7.0", features = ["task-arena-size-65536"] }
 embassy-net = { version = "0.7.0", features = ["tcp", "udp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
 embassy-time = { version = "0.4.0" }
-esp-storage = { version = "0.5.0", features = ["esp32s3"] }
+esp-storage = { version = "0.6.0", features = ["esp32s3"] }
 embedded-storage = "0.3.1"
 esp-hal-wifimanager = { path = "../", default-features = false, features = ["esp32s3", "ble", "ap"] }
 static_cell = { version = "2.1.0", features = ["nightly"] }
 heapless = { version = "0.8.0", default-features = false }
-esp-alloc = "0.7.0"
+esp-alloc = "0.8.0"
 
 [build-dependencies]
 dotenvy = "0.15.7"
