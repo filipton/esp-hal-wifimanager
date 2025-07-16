@@ -15,10 +15,7 @@ use embassy_net::{Config, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::{
-    peripherals::{RADIO_CLK, WIFI},
-    rng::Rng,
-};
+use esp_hal::{peripherals::WIFI, rng::Rng};
 use esp_wifi::EspWifiController;
 use esp_wifi::{
     wifi::{WifiController, WifiDevice, WifiEvent, WifiState},
@@ -60,7 +57,6 @@ pub async fn init_wm(
     nvs: Option<&Nvs>,
     mut rng: Rng,
     timer: impl EspWifiTimerSource + 'static,
-    radio_clocks: RADIO_CLK<'static>,
     wifi: WIFI<'static>,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
     ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
@@ -69,7 +65,7 @@ pub async fn init_wm(
 
     let init = &*mk_static!(
         EspWifiController<'static>,
-        esp_wifi::init(timer, rng.clone(), radio_clocks)?
+        esp_wifi::init(timer, rng.clone())?
     );
 
     let (mut controller, interfaces) = esp_wifi::wifi::new(&init, wifi)?;

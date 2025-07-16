@@ -19,6 +19,8 @@ macro_rules! make_static {
 }
 */
 
+esp_bootloader_esp_idf::esp_app_desc!();
+
 #[esp_hal_embassy::main]
 async fn main(spawner: Spawner) {
     esp_alloc::heap_allocator!(size: 150 * 1024);
@@ -58,7 +60,6 @@ async fn main(spawner: Spawner) {
         Some(&nvs),
         rng.clone(),
         timg0.timer0,
-        peripherals.RADIO_CLK,
         peripherals.WIFI,
         peripherals.BT,
         None,
