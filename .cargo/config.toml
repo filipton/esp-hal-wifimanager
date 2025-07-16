@@ -8,9 +8,6 @@ esp32c6 = "build --no-default-features --features=esp32c6,ble,ap --target=riscv3
 
 esp32 = "build --no-default-features --features=esp32,ble,ap --target=xtensa-esp32-none-elf"
 
-# default target for esp32s3
-target = "xtensa-esp32s3-none-elf"
-
 [target.'cfg(target_arch = "riscv32")']
 rustflags = [
   "-C", "force-frame-pointers",
@@ -21,6 +18,9 @@ rustflags = [
   "-C", "link-arg=-nostartfiles",
 ]
 
+[build]
+# default target for esp32s3
+target = "xtensa-esp32s3-none-elf"
 
 [unstable]
 build-std = ["alloc", "core"]
