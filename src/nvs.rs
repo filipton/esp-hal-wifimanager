@@ -11,7 +11,7 @@ use tickv::{ErrorCode, FlashController};
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
 
-static mut NVS_READ_BUF: &'static mut [u8; 1024] = &mut [0; 1024];
+static mut NVS_READ_BUF: &mut [u8; 1024] = &mut [0; 1024];
 static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
 pub struct Nvs {
@@ -33,6 +33,10 @@ impl Nvs {
         unsafe { Self::new_unchecked(flash_offset, flash_size) }
     }
 
+    /// # Safety
+    ///
+    /// This is not checking if other nvs instance already exists (there should be only one nvs
+    /// instancce!)
     pub unsafe fn new_unchecked(flash_offset: usize, flash_size: usize) -> crate::Result<Self> {
         let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
             NvsFlash::new(flash_offset),
@@ -52,10 +56,10 @@ impl Nvs {
 
     pub fn new_from_part_table() -> crate::Result<Self> {
         if let Some((offset, size)) = Self::read_nvs_partition_offset() {
-            return Self::new(offset, size);
+            Self::new(offset, size)
         } else {
             log::error!("Nvs partition not found!");
-            return Err(crate::WmError::Other);
+            Err(crate::WmError::Other)
         }
     }
 
@@ -66,12 +70,12 @@ impl Nvs {
         let mut bytes = [0xFF; 32];
         for read_offset in (0..PART_SIZE).step_by(32) {
             _ = flash.read(PART_OFFSET + read_offset, &mut bytes);
-            if &bytes == &[0xFF; 32] {
+            if bytes == [0xFF; 32] {
                 break;
             }
 
             let magic = &bytes[0..2];
-            if magic != &[0xAA, 0x50] {
+            if magic != [0xAA, 0x50] {
                 continue;
             }
 
@@ -118,7 +122,6 @@ impl Nvs {
                     written += chunk_size;
                 }
 
-                drop(flash);
                 self.tickv.initialise(hash(tickv::MAIN_KEY))?;
                 self.tickv.append_key(hash(key), buf)?;
             }
@@ -133,11 +136,17 @@ impl Nvs {
         Ok(())
     }
 
+    /// # Safety
+    ///
+    /// This doesn't check for semaphore!
     pub unsafe fn get_key_unchecked(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
         self.tickv.get_key(hash(key), buf)?;
         Ok(())
     }
 
+    /// # Safety
+    ///
+    /// This doesn't check for semaphore!
     pub unsafe fn append_key_unckeched(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
         let res = self.tickv.append_key(hash(key), buf);
         if let Err(e) = res {
@@ -157,7 +166,6 @@ impl Nvs {
                     written += chunk_size;
                 }
 
-                drop(flash);
                 self.tickv.initialise(hash(tickv::MAIN_KEY))?;
                 self.tickv.append_key(hash(key), buf)?;
             }
@@ -166,6 +174,9 @@ impl Nvs {
         Ok(())
     }
 
+    /// # Safety
+    ///
+    /// This doesn't check for semaphore!
     pub unsafe fn invalidate_key_unchecked(&self, key: &[u8]) -> crate::Result<()> {
         self.tickv.invalidate_key(hash(key))?;
         Ok(())

@@ -40,7 +40,7 @@ mod nvs;
 mod structs;
 mod utils;
 
-pub const WIFI_NVS_KEY: &'static [u8] = b"WIFI_SETUP";
+pub const WIFI_NVS_KEY: &[u8] = b"WIFI_SETUP";
 
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
@@ -51,6 +51,7 @@ macro_rules! mk_static {
     }};
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn init_wm(
     settings: WmSettings,
     spawner: &Spawner,
@@ -63,12 +64,8 @@ pub async fn init_wm(
 ) -> Result<WmReturn> {
     let generated_ssid = settings.ssid.clone();
 
-    let init = &*mk_static!(
-        EspWifiController<'static>,
-        esp_wifi::init(timer, rng.clone())?
-    );
-
-    let (mut controller, interfaces) = esp_wifi::wifi::new(&init, wifi)?;
+    let init = &*mk_static!(EspWifiController<'static>, esp_wifi::init(timer, rng)?);
+    let (mut controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
     controller.set_power_saving(esp_wifi::config::PowerSaveMode::None)?;
 
     let mut wifi_setup = [0; 1024];
@@ -93,7 +90,7 @@ pub async fn init_wm(
     let mut wifi_connected = false;
     let mut controller_started = false;
     if let Some(ref wifi_setup) = wifi_setup {
-        log::warn!("Read wifi_setup from flash: {:?}", wifi_setup);
+        log::warn!("Read wifi_setup from flash: {wifi_setup:?}");
         controller.set_configuration(&wifi_setup.to_configuration()?)?;
         controller.start_async().await?;
         controller_started = true;
@@ -131,7 +128,7 @@ pub async fn init_wm(
         #[cfg(feature = "ap")]
         utils::spawn_ap(
             &mut rng,
-            &spawner,
+            spawner,
             wm_signals.clone(),
             settings.clone(),
             interfaces.ap,
@@ -218,7 +215,7 @@ async fn wifi_connection_worker(
             let setup_info_buf = wm_signals.wifi_conn_info_sig.wait().await;
             let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf)?;
 
-            log::warn!("trying to connect to: {:?}", setup_info);
+            log::warn!("trying to connect to: {setup_info:?}");
             #[cfg(feature = "ap")]
             {
                 *configuration.as_mixed_conf_mut().0 = setup_info.to_client_conf()?;
@@ -238,7 +235,7 @@ async fn wifi_connection_worker(
 
             if wifi_connected {
                 if let Some(nvs) = nvs {
-                    _ = nvs.invalidate_key(&WIFI_NVS_KEY).await;
+                    _ = nvs.invalidate_key(WIFI_NVS_KEY).await;
                     nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
                 }
 

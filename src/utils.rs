@@ -36,13 +36,7 @@ pub async fn spawn_ap(
 
     spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
     spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
-    crate::http::run_http_server(
-        spawner,
-        ap_stack.clone(),
-        wm_signals.clone(),
-        settings.wifi_panel,
-    )
-    .await;
+    crate::http::run_http_server(spawner, ap_stack, wm_signals.clone(), settings.wifi_panel).await;
 
     Ok(())
 }
