@@ -180,7 +180,7 @@ pub struct WmInnerSignals {
     /// This is used to tell main task to connect to wifi
     pub wifi_conn_info_sig: Signal<NoopRawMutex, alloc::vec::Vec<u8>>,
 
-    /// This is used to tell ble task about conn result
+    /// This is used to tell ble task about conn result (return signal)
     pub wifi_conn_res_sig: Signal<NoopRawMutex, bool>,
 
     end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 16, 1>,
@@ -209,7 +209,7 @@ impl WmInnerSignals {
     pub fn signal_end(&self) {
         self.end_signal_pubsub
             .publisher()
-            .expect("Should fail getting publisher")
+            .expect("Shouldnt fail getting publisher")
             .publish_immediate(());
     }
 }

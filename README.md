@@ -28,9 +28,9 @@ Add this to your Cargo.toml (note also add `embassy`, its only for async):
 NOTE: this section is not updated, will update it sometime near feature.
 ```toml
 [dependencies]
-esp-hal = { version = "0.19.0", features = [ "esp32s3", "async" ] }
-esp-wifi = { version = "0.7.1", features = [ "esp32s3", "phy-enable-usb", "coex" ] }
-esp-hal-embassy = { version = "0.2.0", features = ["integrated-timers", "esp32s3"] }
+esp-hal = { version = "1.0.0-rc.0", features = [ "esp32s3", "unstable" ] }
+esp-wifi = { version = "0.15.0", features = [ "esp32s3", "coex" ] }
+esp-hal-embassy = { version = "0.9.0", features = ["esp32s3"] }
 ```
 
 Simple example (to see full example check `./examples` dir):
@@ -43,10 +43,9 @@ let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
 let wifi_res = esp_hal_wifimanager::init_wm(
     wm_settings,
     &spawner,
-    &nvs,
+    Some(&nvs),
     rng.clone(),
     timg0.timer0,
-    peripherals.RADIO_CLK,
     peripherals.WIFI,
     peripherals.BT, // only if ble feature is enabled
     None, // signal for ap/ble start
@@ -79,6 +78,5 @@ unsafe {
 ```
 
 ## TODO:
-- [x] Working `ap` feature (disabling it)
 - [ ] Big cleanup
 - [ ] Configurable AP panel files (also allow multiple files)

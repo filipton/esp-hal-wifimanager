@@ -298,7 +298,6 @@ async fn connection(
                 embassy_futures::select::Either::First(_) => {}
                 embassy_futures::select::Either::Second(val) => {
                     if val {
-                        // TODO: maybe add error handling?
                         _ = controller.disconnect_async().await;
                         _ = controller.stop_async().await;
                         log::info!("WIFI radio stopped!");
