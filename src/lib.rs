@@ -90,7 +90,7 @@ pub async fn init_wm(
     let mut wifi_connected = false;
     let mut controller_started = false;
     if let Some(ref wifi_setup) = wifi_setup {
-        log::warn!("Read wifi_setup from flash: {wifi_setup:?}");
+        log::debug!("Read wifi_setup from flash: {wifi_setup:?}");
         controller.set_configuration(&wifi_setup.to_configuration()?)?;
         controller.start_async().await?;
         controller_started = true;
@@ -215,7 +215,7 @@ async fn wifi_connection_worker(
             let setup_info_buf = wm_signals.wifi_conn_info_sig.wait().await;
             let setup_info: AutoSetupSettings = serde_json::from_slice(&setup_info_buf)?;
 
-            log::warn!("trying to connect to: {setup_info:?}");
+            log::debug!("trying to connect to: {setup_info:?}");
             #[cfg(feature = "ap")]
             {
                 *configuration.as_mixed_conf_mut().0 = setup_info.to_client_conf()?;

@@ -49,7 +49,7 @@ pub async fn try_to_wifi_connect(
 
     loop {
         if start_time.elapsed().as_millis() > wifi_conn_timeout {
-            log::warn!("Connect timeout 1!");
+            log::warn!("Connect timeout (1)!");
             return false;
         }
 
@@ -69,7 +69,7 @@ pub async fn try_to_wifi_connect(
                 }
             },
             Err(_) => {
-                log::warn!("Connect timeout!");
+                log::warn!("Connect timeout (0)!");
                 return false;
             }
         }
