@@ -15,6 +15,7 @@ static mut NVS_READ_BUF: &mut [u8; 1024] = &mut [0; 1024];
 static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
 pub struct Nvs {
+    flash_peripheral: esp_hal::peripherals::FLASH<'static>,
     tickv: Rc<tickv::TicKV<'static, NvsFlash, 1024>>,
     semaphore: Rc<GreedySemaphore<CriticalSectionRawMutex>>,
 
@@ -23,29 +24,38 @@ pub struct Nvs {
 }
 
 impl Nvs {
-    pub fn new(flash_offset: usize, flash_size: usize) -> crate::Result<Self> {
+    pub fn new(
+        flash_offset: usize,
+        flash_size: usize,
+        flash: esp_hal::peripherals::FLASH<'static>,
+    ) -> crate::Result<Self> {
         if NVS_INSTANCES.load(core::sync::atomic::Ordering::Relaxed) > 0 {
             log::error!("Cannot spawn new NVS struct, clone original one instead!");
             return Err(crate::WmError::NvsError);
         }
 
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        unsafe { Self::new_unchecked(flash_offset, flash_size) }
+        unsafe { Self::new_unchecked(flash_offset, flash_size, flash) }
     }
 
     /// # Safety
     ///
     /// This is not checking if other nvs instance already exists (there should be only one nvs
     /// instancce!)
-    pub unsafe fn new_unchecked(flash_offset: usize, flash_size: usize) -> crate::Result<Self> {
+    pub unsafe fn new_unchecked(
+        flash_offset: usize,
+        flash_size: usize,
+        flash: esp_hal::peripherals::FLASH<'static>,
+    ) -> crate::Result<Self> {
         let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-            NvsFlash::new(flash_offset),
+            NvsFlash::new(flash_offset, unsafe { flash.clone_unchecked() }),
             unsafe { NVS_READ_BUF },
             flash_size,
         );
         nvs.initialise(hash(tickv::MAIN_KEY))?;
 
         Ok(Nvs {
+            flash_peripheral: flash,
             tickv: Rc::new(nvs),
             semaphore: Rc::new(GreedySemaphore::new(1)),
 
@@ -54,17 +64,21 @@ impl Nvs {
         })
     }
 
-    pub fn new_from_part_table() -> crate::Result<Self> {
-        if let Some((offset, size)) = Self::read_nvs_partition_offset() {
-            Self::new(offset, size)
+    pub fn new_from_part_table(flash: esp_hal::peripherals::FLASH<'static>) -> crate::Result<Self> {
+        if let Some((offset, size)) =
+            Self::read_nvs_partition_offset(unsafe { flash.clone_unchecked() })
+        {
+            Self::new(offset, size, flash)
         } else {
             log::error!("Nvs partition not found!");
             Err(crate::WmError::Other)
         }
     }
 
-    pub fn read_nvs_partition_offset() -> Option<(usize, usize)> {
-        let mut flash = esp_storage::FlashStorage::new();
+    pub fn read_nvs_partition_offset(
+        flash: esp_hal::peripherals::FLASH<'static>,
+    ) -> Option<(usize, usize)> {
+        let mut flash = esp_storage::FlashStorage::new(flash);
 
         let mut nvs_part = None;
         let mut bytes = [0xFF; 32];
@@ -111,7 +125,9 @@ impl Nvs {
                     "Unsupported version while appending flash key... Wiping NVS partition!"
                 );
 
-                let mut flash = esp_storage::FlashStorage::new();
+                let mut flash = esp_storage::FlashStorage::new(unsafe {
+                    self.flash_peripheral.clone_unchecked()
+                });
                 let mut written = 0;
 
                 while written < self.size {
@@ -155,7 +171,9 @@ impl Nvs {
                     "Unsupported version while appending flash key... Wiping NVS partition!"
                 );
 
-                let mut flash = esp_storage::FlashStorage::new();
+                let mut flash = esp_storage::FlashStorage::new(unsafe {
+                    self.flash_peripheral.clone_unchecked()
+                });
                 let mut written = 0;
 
                 while written < self.size {
@@ -194,6 +212,7 @@ impl Clone for Nvs {
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
         Self {
+            flash_peripheral: unsafe { self.flash_peripheral.clone_unchecked() },
             tickv: self.tickv.clone(),
             semaphore: self.semaphore.clone(),
             offset: self.offset,
@@ -204,14 +223,14 @@ impl Clone for Nvs {
 
 pub struct NvsFlash {
     flash_offset: u32,
-    flash: Mutex<CriticalSectionRawMutex, esp_storage::FlashStorage>,
+    flash: Mutex<CriticalSectionRawMutex, esp_storage::FlashStorage<'static>>,
 }
 
 impl NvsFlash {
-    pub fn new(flash_offset: usize) -> Self {
+    pub fn new(flash_offset: usize, flash: esp_hal::peripherals::FLASH<'static>) -> Self {
         Self {
             flash_offset: flash_offset as u32,
-            flash: Mutex::new(esp_storage::FlashStorage::new()),
+            flash: Mutex::new(esp_storage::FlashStorage::new(flash)),
         }
     }
 }

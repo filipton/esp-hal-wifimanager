@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use embassy_net::{Runner, Stack};
 use embassy_time::Duration;
-use esp_wifi::wifi::WifiDevice;
+use esp_radio::wifi::WifiDevice;
 
 use crate::structs::WmInnerSignals;
 #[embassy_executor::task]

@@ -16,10 +16,9 @@ use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::{peripherals::WIFI, rng::Rng};
-use esp_wifi::EspWifiController;
-use esp_wifi::{
-    wifi::{WifiController, WifiDevice, WifiEvent, WifiState},
-    EspWifiTimerSource,
+use esp_radio::{
+    wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState},
+    Controller,
 };
 use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 
@@ -57,16 +56,15 @@ pub async fn init_wm(
     spawner: &Spawner,
     nvs: Option<&Nvs>,
     mut rng: Rng,
-    timer: impl EspWifiTimerSource + 'static,
     wifi: WIFI<'static>,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
     ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
 ) -> Result<WmReturn> {
     let generated_ssid = settings.ssid.clone();
 
-    let init = &*mk_static!(EspWifiController<'static>, esp_wifi::init(timer, rng)?);
-    let (mut controller, interfaces) = esp_wifi::wifi::new(init, wifi)?;
-    controller.set_power_saving(esp_wifi::config::PowerSaveMode::None)?;
+    let init = &*mk_static!(Controller<'static>, esp_radio::init()?);
+    let (mut controller, interfaces) = esp_radio::wifi::new(init, wifi, Default::default())?;
+    controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None)?;
 
     let mut wifi_setup = [0; 1024];
     let wifi_setup = if let Some(nvs) = nvs {
@@ -91,7 +89,7 @@ pub async fn init_wm(
     let mut controller_started = false;
     if let Some(ref wifi_setup) = wifi_setup {
         log::debug!("Read wifi_setup from flash: {wifi_setup:?}");
-        controller.set_configuration(&wifi_setup.to_configuration()?)?;
+        controller.set_config(&wifi_setup.to_configuration()?)?;
         controller.start_async().await?;
         controller_started = true;
 
@@ -112,18 +110,15 @@ pub async fn init_wm(
         }
 
         #[cfg(feature = "ap")]
-        let configuration = esp_wifi::wifi::Configuration::Mixed(
+        let configuration = esp_radio::wifi::ModeConfig::ApSta(
             Default::default(),
-            esp_wifi::wifi::AccessPointConfiguration {
-                ssid: generated_ssid.clone(),
-                ..Default::default()
-            },
+            esp_radio::wifi::AccessPointConfig::default().with_ssid(generated_ssid.clone()),
         );
 
         #[cfg(not(feature = "ap"))]
-        let configuration = esp_wifi::wifi::Configuration::Client(Default::default());
+        let configuration = esp_radio::wifi::ModeConfig::Client(Default::default());
 
-        controller.set_configuration(&configuration)?;
+        controller.set_config(&configuration)?;
 
         #[cfg(feature = "ap")]
         utils::spawn_ap(
@@ -161,7 +156,7 @@ pub async fn init_wm(
         )
         .await?;
 
-        controller.set_configuration(&wifi_setup.to_configuration()?)?;
+        controller.set_config(&wifi_setup.to_configuration()?)?;
         if settings.esp_restart_after_connection {
             log::info!("Wifimanager reset after succesfull first connection...");
             Timer::after_millis(1000).await;
@@ -206,7 +201,7 @@ async fn wifi_connection_worker(
     wm_signals: Rc<WmInnerSignals>,
     nvs: Option<&Nvs>,
     controller: &mut WifiController<'static>,
-    mut configuration: esp_wifi::wifi::Configuration,
+    mut configuration: esp_radio::wifi::ModeConfig,
 ) -> Result<AutoSetupSettings> {
     let start_time = Instant::now();
     let mut last_scan = Instant::MIN;
@@ -218,15 +213,24 @@ async fn wifi_connection_worker(
             log::debug!("trying to connect to: {setup_info:?}");
             #[cfg(feature = "ap")]
             {
-                *configuration.as_mixed_conf_mut().0 = setup_info.to_client_conf()?;
+                let esp_radio::wifi::ModeConfig::ApSta(ref mut client_conf, _) = configuration
+                else {
+                    return Err(WmError::Other);
+                };
+
+                *client_conf = setup_info.to_client_conf()?;
             }
 
             #[cfg(not(feature = "ap"))]
             {
-                *configuration.as_client_conf_mut() = setup_info.to_client_conf()?;
+                let esp_radio::wifi::ModeConfig::Sta(ref mut client_conf) = configuration else {
+                    return Err(WmError::Other);
+                };
+
+                *client_conf = setup_info.to_client_conf()?;
             }
 
-            controller.set_configuration(&configuration)?;
+            controller.set_config(&configuration)?;
 
             let wifi_connected =
                 utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await;
@@ -286,7 +290,7 @@ async fn connection(
     log::info!("WIFI Device capabilities: {:?}", controller.capabilities());
 
     loop {
-        if esp_wifi::wifi::wifi_state() == WifiState::StaConnected {
+        if esp_radio::wifi::sta_state() == WifiStaState::Connected {
             // wait until we're no longer connected
             let res = embassy_futures::select::select(
                 controller.wait_for_event(WifiEvent::StaDisconnected),

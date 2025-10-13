@@ -21,7 +21,7 @@ macro_rules! make_static {
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-#[esp_hal_embassy::main]
+#[esp_rtos::main]
 async fn main(spawner: Spawner) {
     esp_alloc::heap_allocator!(size: 150 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());
@@ -36,11 +36,11 @@ async fn main(spawner: Spawner) {
     esp_println::logger::init_logger_from_env();
     log::set_max_level(log::LevelFilter::Info);
 
-    let timg1 = TimerGroup::new(peripherals.TIMG1);
-    esp_hal_embassy::init(timg1.timer0);
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0);
 
-    let rng = esp_hal::rng::Rng::new(peripherals.RNG);
-    let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000).unwrap();
+    let rng = esp_hal::rng::Rng::new();
+    let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000, peripherals.FLASH).unwrap();
 
     let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
 
@@ -53,13 +53,11 @@ async fn main(spawner: Spawner) {
     wm_settings.wifi_conn_timeout = 30000;
     wm_settings.esp_reset_timeout = Some(300000); // 5min
 
-    let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
     let wifi_res = esp_hal_wifimanager::init_wm(
         wm_settings,
         &spawner,
         Some(&nvs),
         rng.clone(),
-        timg0.timer0,
         peripherals.WIFI,
         peripherals.BT,
         None,

@@ -1,12 +1,11 @@
+use crate::structs::WmInnerSignals;
 use alloc::{rc::Rc, string::String};
 use core::str::FromStr;
 use embassy_futures::select::Either::{First, Second};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
-use esp_wifi::{ble::controller::BleConnector, EspWifiController};
+use esp_radio::{ble::controller::BleConnector, Controller as RadioController};
 use trouble_host::prelude::*;
-
-use crate::structs::WmInnerSignals;
 
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
@@ -27,12 +26,16 @@ struct WifiService {
 
 #[embassy_executor::task]
 pub async fn bluetooth_task(
-    init: &'static EspWifiController<'static>,
+    init: &'static RadioController<'static>,
     bt: BT<'static>,
     name: String,
     signals: Rc<WmInnerSignals>,
 ) {
-    let connector = BleConnector::new(init, bt);
+    let Ok(connector) = BleConnector::new(init, bt, esp_radio::ble::Config::default()) else {
+        log::error!("Cannot init ble connector");
+        return;
+    };
+
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
     let address: Address = Address::random(esp_hal::efuse::Efuse::mac_address());

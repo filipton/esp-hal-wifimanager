@@ -1,5 +1,4 @@
-use core::str::FromStr;
-
+use crate::get_efuse_mac;
 use alloc::{rc::Rc, string::String};
 use embassy_executor::SpawnError;
 use embassy_net::Stack;
@@ -9,13 +8,11 @@ use embassy_sync::{
     pubsub::PubSubChannel,
     signal::Signal,
 };
-use esp_wifi::{
-    wifi::{ClientConfiguration, Configuration, WifiError},
-    EspWifiController, InitializationError,
+use esp_radio::{
+    wifi::{ClientConfig, ModeConfig, WifiError},
+    Controller, InitializationError,
 };
 use serde::{Deserialize, Serialize};
-
-use crate::get_efuse_mac;
 
 pub type Result<T> = core::result::Result<T, WmError>;
 
@@ -110,16 +107,14 @@ pub(crate) struct AutoSetupSettings {
 }
 
 impl AutoSetupSettings {
-    pub fn to_configuration(&self) -> Result<Configuration> {
-        Ok(Configuration::Client(self.to_client_conf()?))
+    pub fn to_configuration(&self) -> Result<ModeConfig> {
+        Ok(ModeConfig::Client(self.to_client_conf()?))
     }
 
-    pub fn to_client_conf(&self) -> Result<ClientConfiguration> {
-        Ok(ClientConfiguration {
-            ssid: String::from_str(&self.ssid)?,
-            password: String::from_str(&self.psk)?,
-            ..Default::default()
-        })
+    pub fn to_client_conf(&self) -> Result<ClientConfig> {
+        Ok(ClientConfig::default()
+            .with_ssid(self.ssid.clone())
+            .with_password(self.psk.clone()))
     }
 }
 
@@ -143,7 +138,7 @@ impl Default for WmSettings {
 }
 
 pub struct WmReturn {
-    pub wifi_init: &'static EspWifiController<'static>,
+    pub wifi_init: &'static Controller<'static>,
     pub sta_stack: Stack<'static>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],

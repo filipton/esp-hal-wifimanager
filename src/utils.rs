@@ -3,7 +3,7 @@ use alloc::rc::Rc;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_wifi::wifi::{WifiController, WifiDevice};
+use esp_radio::wifi::{WifiController, WifiDevice};
 
 #[cfg(feature = "ap")]
 use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
