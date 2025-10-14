@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-wifimanager"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "embassy-executor",
  "embassy-futures",
@@ -1783,9 +1783,9 @@ dependencies = [
 
 [[package]]
 name = "trouble-host"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78a852f6e193f71732ce3c33661fea2575ba3dac6f48bbe1713059373f96e864"
+checksum = "b5b5d5992d07744e464b294ccf2dd6d96285bd61c267c4e0307d1f7057a8cd7f"
 dependencies = [
  "bt-hci",
  "embassy-futures",
