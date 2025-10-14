@@ -62,8 +62,8 @@ impl AppWithStateBuilder for AppProps {
                 post(
                     |State(app_state): State<AppState>, Bytes(bytes): Bytes| async move {
                         app_state.signals.wifi_conn_info_sig.signal(bytes);
-                        let wifi_connected = app_state.signals.wifi_conn_res_sig.wait().await;
-                        alloc::format!("{wifi_connected}")
+                        //let wifi_connected = app_state.signals.wifi_conn_res_sig.wait().await;
+                        alloc::format!(".")
                     },
                 ),
             )

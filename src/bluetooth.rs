@@ -56,7 +56,7 @@ pub async fn bluetooth_task(
     }))
     .unwrap();
 
-    let _ = embassy_futures::join::join(ble_task(runner), async {
+    _ = embassy_futures::select::select3(ble_task(runner), stop_ble_task(&signals), async {
         loop {
             match advertise(&name, &mut peripheral, &server).await {
                 Ok(conn) => {
@@ -66,10 +66,7 @@ pub async fn bluetooth_task(
                     let res = embassy_futures::select::select(a, b).await;
                     match res {
                         First(_) => {}
-                        Second(_) => {
-                            // wifi connected returns custom_task
-                            break;
-                        }
+                        Second(_) => {}
                     }
                 }
                 Err(e) => {
@@ -180,10 +177,6 @@ async fn custom_task<C: Controller, P: PacketPool>(
                     .signal(bytes[..bytes.len() - 1].to_vec());
 
                 _ = setup_string.set(server, &heapless::String::new());
-                let wifi_connected = signals.wifi_conn_res_sig.wait().await;
-                if wifi_connected {
-                    return;
-                }
             }
         }
 
@@ -197,5 +190,15 @@ async fn custom_task<C: Controller, P: PacketPool>(
         */
 
         Timer::after_millis(250).await;
+    }
+}
+
+async fn stop_ble_task(signals: &Rc<WmInnerSignals>) {
+    loop {
+        let wifi_connected = signals.wifi_conn_res_sig.wait().await;
+        if wifi_connected {
+            log::debug!("Stopping ble task!");
+            return;
+        }
     }
 }
