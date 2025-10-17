@@ -5,6 +5,7 @@ use embassy_futures::select::Either::{First, Second};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
 use esp_radio::{ble::controller::BleConnector, Controller as RadioController};
+use rand_core::OsRng;
 use trouble_host::prelude::*;
 
 const CONNECTIONS_MAX: usize = 1;
@@ -43,7 +44,10 @@ pub async fn bluetooth_task(
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
+    let stack = trouble_host::new(controller, &mut resources)
+        .set_random_address(address)
+        .set_random_generator_seed(&mut OsRng);
+
     let Host {
         mut peripheral,
         runner,
