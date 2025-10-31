@@ -6,22 +6,22 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-esp-backtrace = { version = "0.18.0", features = [ "esp32s3", "panic-handler", "println" ] }
-esp-hal = { version = "1.0.0-rc.1", features = [ "esp32s3", "unstable" ] }
-esp-println = { version = "0.16.0", features = ["esp32s3", "log-04"] }
-log = { version = "0.4.27" }
-esp-radio = { version = "0.16.0", features = [ "esp32s3", "coex", "esp-alloc" ] }
-esp-rtos = { version = "0.1.0", features = ["esp32s3", "embassy", "esp-radio"] }
+esp-backtrace = { version = "0.18.1", features = [ "esp32s3", "panic-handler", "println" ] }
+esp-hal = { version = "1.0.0", features = [ "esp32s3", "unstable" ] }
+esp-println = { version = "0.16.1", features = ["esp32s3", "log-04"] }
+log = { version = "0.4.28" }
+esp-radio = { version = "0.17.0", features = [ "esp32s3", "coex", "esp-alloc" ] }
+esp-rtos = { version = "0.2.0", features = ["esp32s3", "embassy", "esp-radio"] }
 embassy-executor = { version = "0.9.1", features = [] }
 embassy-net = { version = "0.7.1", features = ["tcp", "udp", "dhcpv4", "medium-ethernet", "proto-ipv4"] }
 embassy-time = { version = "0.5.0" }
-esp-storage = { version = "0.8.0", features = ["esp32s3"] }
+esp-storage = { version = "0.8.1", features = ["esp32s3"] }
 embedded-storage = "0.3.1"
 esp-hal-wifimanager = { path = "../", default-features = false, features = ["esp32s3", "ble", "ap"] }
 static_cell = { version = "2.1.1", features = ["nightly"] }
 heapless = { version = "0.9.1", default-features = false }
 esp-alloc = "0.9.0"
-esp-bootloader-esp-idf = { version = "0.3.0", features = ["esp32s3", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3", "log-04"] }
 
 [build-dependencies]
 dotenvy = "0.15.7"
