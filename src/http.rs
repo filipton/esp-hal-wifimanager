@@ -1,103 +1,146 @@
 use crate::structs::WmInnerSignals;
-use alloc::{rc::Rc, vec::Vec};
+use alloc::{format, rc::Rc, vec::Vec};
 use embassy_executor::Spawner;
-use embassy_net::Stack;
-use embassy_time::Duration;
-use picoserve::{
-    extract::{FromRequest, State},
-    routing::{get, get_service, post},
-    AppRouter, AppWithStateBuilder,
-};
+use embassy_net::{tcp::TcpSocket, Stack};
+use embassy_time::{Duration, Timer};
 
 const WEB_TASK_POOL_SIZE: usize = 2;
+const HTTP_BUFFER_SIZE: usize = 2048;
 
-#[derive(Clone)]
-struct AppState {
-    signals: Rc<WmInnerSignals>,
+struct HttpRequest<'a> {
+    method: &'a str,
+    path: &'a str,
+    body: &'a [u8],
 }
 
-struct AppProps {
+fn parse_http_request(buffer: &[u8]) -> Option<HttpRequest<'_>> {
+    let request = core::str::from_utf8(buffer).ok()?;
+    let mut lines = request.lines();
+
+    let first_line = lines.next()?;
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next()?;
+    let path = parts.next()?;
+
+    // find body (after \r\n\r\n)
+    let body_start = request
+        .find("\r\n\r\n")
+        .map(|i| i + 4)
+        .unwrap_or(request.len());
+    let body = &buffer[body_start..];
+
+    Some(HttpRequest { method, path, body })
+}
+
+fn create_http_response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
+    let body_bytes = body.as_bytes();
+    let header = format!(
+        "HTTP/1.1 {}\r\nContent-Type: {}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        status,
+        content_type,
+        body_bytes.len()
+    );
+
+    let mut response = Vec::with_capacity(header.len() + body_bytes.len());
+    response.extend_from_slice(header.as_bytes());
+    response.extend_from_slice(body_bytes);
+    response
+}
+
+async fn handle_request(
+    request: HttpRequest<'_>,
+    signals: &Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
-}
-
-struct Bytes(Vec<u8>);
-impl<'r, State> FromRequest<'r, State> for Bytes {
-    type Rejection = ();
-
-    async fn from_request<R: picoserve::io::Read>(
-        _state: &'r State,
-        _request_parts: picoserve::request::RequestParts<'r>,
-        request_body: picoserve::request::RequestBody<'r, R>,
-    ) -> Result<Self, Self::Rejection> {
-        Ok(Bytes(
-            request_body.read_all().await.map_err(|_| ())?.to_vec(),
-        ))
-    }
-}
-
-impl AppWithStateBuilder for AppProps {
-    type State = AppState;
-    type PathRouter = impl picoserve::routing::PathRouter<AppState>;
-
-    fn build_app(self) -> picoserve::Router<Self::PathRouter, Self::State> {
-        picoserve::Router::new()
-            .route(
-                "/",
-                get_service(picoserve::response::File::html(self.wifi_panel_str)),
-            )
-            .route(
-                "/list",
-                get(|State(app_state): State<AppState>| async move {
-                    let resp_res = app_state.signals.wifi_scan_res.try_lock();
-                    let resp = match resp_res {
-                        Ok(ref resp) => resp.as_str(),
-                        Err(_) => "",
-                    };
-
-                    alloc::string::ToString::to_string(&resp)
-                }),
-            )
-            .route(
-                "/setup",
-                post(
-                    |State(app_state): State<AppState>, Bytes(bytes): Bytes| async move {
-                        app_state.signals.wifi_conn_info_sig.signal(bytes);
-                        //let wifi_connected = app_state.signals.wifi_conn_res_sig.wait().await;
-                        alloc::format!(".")
-                    },
-                ),
-            )
+) -> Vec<u8> {
+    match (request.method, request.path) {
+        ("GET", "/") => create_http_response("200 OK", "text/html", wifi_panel_str),
+        ("GET", "/list") => {
+            let scan_res = signals.wifi_scan_res.try_lock();
+            let resp = match scan_res {
+                Ok(ref resp) => resp.as_str(),
+                Err(_) => "",
+            };
+            create_http_response("200 OK", "text/plain", resp)
+        }
+        ("POST", "/setup") => {
+            let body_vec = request.body.to_vec();
+            signals.wifi_conn_info_sig.signal(body_vec);
+            create_http_response("200 OK", "text/plain", ".")
+        }
+        _ => create_http_response("404 Not Found", "text/plain", "Not Found"),
     }
 }
 
 #[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
 async fn web_task(
-    id: usize,
-    stack: embassy_net::Stack<'static>,
-    app: &'static AppRouter<AppProps>,
-    config: &'static picoserve::Config<Duration>,
+    _id: usize,
+    stack: Stack<'static>,
     signals: Rc<WmInnerSignals>,
+    wifi_panel_str: &'static str,
 ) {
-    let port = 80;
-    let mut tcp_rx_buffer = alloc::vec![0; 1024];
-    let mut tcp_tx_buffer = alloc::vec![0; 1024];
-    let mut http_buffer = alloc::vec![0; 2048];
+    let fut = async {
+        let mut rx_buffer = [0; 1024];
+        let mut tx_buffer = [0; 1024];
+        let mut http_buffer = alloc::vec![0; HTTP_BUFFER_SIZE];
 
-    let state = AppState {
-        signals: signals.clone(),
+        loop {
+            let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+            socket.set_timeout(Some(Duration::from_secs(10)));
+
+            if socket.accept(80).await.is_err() {
+                Timer::after(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            // read req
+            let mut total_read = 0;
+            loop {
+                match socket.read(&mut http_buffer[total_read..]).await {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        total_read += n;
+                        if http_buffer[..total_read]
+                            .windows(4)
+                            .any(|w| w == b"\r\n\r\n")
+                        {
+                            break;
+                        }
+                        if total_read >= HTTP_BUFFER_SIZE {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            if total_read == 0 {
+                let _ = socket.close();
+                continue;
+            }
+
+            // parse and handle request
+            if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
+                let resp = handle_request(req, &signals, wifi_panel_str).await;
+                let mut i = 0;
+
+                while i < resp.len() {
+                    match socket.write(&resp[i..]).await {
+                        Ok(n) => {
+                            i += n;
+                        }
+                        Err(e) => {
+                            log::error!("Http wifimanager write error: {e:?}");
+                            break;
+                        }
+                    }
+
+                    _ = socket.flush().await;
+                }
+            }
+
+            let _ = socket.close();
+        }
     };
-
-    let fut = picoserve::listen_and_serve_with_state(
-        id,
-        app,
-        config,
-        stack,
-        port,
-        &mut tcp_rx_buffer,
-        &mut tcp_tx_buffer,
-        &mut http_buffer,
-        &state,
-    );
 
     embassy_futures::select::select(fut, signals.end_signalled()).await;
 }
@@ -108,21 +151,7 @@ pub async fn run_http_server(
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
 ) {
-    let app = AppProps { wifi_panel_str };
-    let app = picoserve::make_static!(AppRouter<AppProps>, app.build_app());
-
-    let config = picoserve::make_static!(
-        picoserve::Config<Duration>,
-        picoserve::Config::new(picoserve::Timeouts {
-            start_read_request: Some(Duration::from_secs(1)),
-            persistent_start_read_request: Some(Duration::from_secs(1)),
-            read_request: Some(Duration::from_secs(1)),
-            write: Some(Duration::from_secs(1)),
-        })
-        .keep_connection_alive()
-    );
-
     for id in 0..WEB_TASK_POOL_SIZE {
-        spawner.must_spawn(web_task(id, ap_stack, app, config, signals.clone()));
+        spawner.must_spawn(web_task(id, ap_stack, signals.clone(), wifi_panel_str));
     }
 }
