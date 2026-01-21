@@ -9,6 +9,7 @@ compile_error!("ESP32-S2 doesnt support BLE!");
 
 extern crate alloc;
 use alloc::rc::Rc;
+use alloc::string::String;
 use core::ops::DerefMut;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Runner, StackResources};
@@ -39,7 +40,7 @@ mod nvs;
 mod structs;
 mod utils;
 
-pub const WIFI_NVS_KEY: &[u8] = b"WIFI_SETUP";
+pub const WIFI_NVS_KEY: &str = "WIFI_SETUP";
 
 macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
@@ -66,19 +67,9 @@ pub async fn init_wm(
     let (mut controller, interfaces) = esp_radio::wifi::new(init, wifi, Default::default())?;
     controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None)?;
 
-    let mut wifi_setup = [0; 1024];
     let wifi_setup = if let Some(nvs) = nvs {
-        match nvs.get_key(WIFI_NVS_KEY, &mut wifi_setup).await {
-            Ok(_) => {
-                let end_pos = wifi_setup
-                    .iter()
-                    .position(|&x| x == 0x00)
-                    .unwrap_or(wifi_setup.len());
-
-                Some(serde_json::from_slice::<AutoSetupSettings>(
-                    &wifi_setup[..end_pos],
-                )?)
-            }
+        match nvs.get::<String>(WIFI_NVS_KEY).await {
+            Ok(wifi_setup) => Some(serde_json::from_str::<AutoSetupSettings>(&wifi_setup)?),
             Err(_) => None,
         }
     } else {
@@ -239,8 +230,9 @@ async fn wifi_connection_worker(
 
             if wifi_connected {
                 if let Some(nvs) = nvs {
-                    _ = nvs.invalidate_key(WIFI_NVS_KEY).await;
-                    nvs.append_key(WIFI_NVS_KEY, &setup_info_buf).await?;
+                    _ = nvs.delete(WIFI_NVS_KEY).await;
+                    nvs.set(WIFI_NVS_KEY, core::str::from_utf8(&setup_info_buf).unwrap())
+                        .await?;
                 }
 
                 #[cfg(feature = "ap")]

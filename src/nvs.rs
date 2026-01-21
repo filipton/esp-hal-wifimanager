@@ -1,23 +1,18 @@
 use alloc::rc::Rc;
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
-    mutex::Mutex,
-    semaphore::{GreedySemaphore, Semaphore},
-};
-use embedded_storage::{ReadStorage, Storage};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
+use embedded_storage::ReadStorage;
+use esp_nvs::{Get, Key, Set};
+use esp_storage::FlashStorage;
 use portable_atomic::AtomicU8;
-use tickv::{ErrorCode, FlashController};
 
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
 
-static mut NVS_READ_BUF: &mut [u8; 1024] = &mut [0; 1024];
+const WIFIMANAGER_NAMESPACE: Key = Key::from_str("wifimanager");
 static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
 pub struct Nvs {
-    flash_peripheral: esp_hal::peripherals::FLASH<'static>,
-    tickv: Rc<tickv::TicKV<'static, NvsFlash, 1024>>,
-    semaphore: Rc<GreedySemaphore<CriticalSectionRawMutex>>,
+    inner: Rc<Mutex<CriticalSectionRawMutex, esp_nvs::Nvs<FlashStorage<'static>>>>,
 
     offset: usize,
     size: usize,
@@ -31,7 +26,7 @@ impl Nvs {
     ) -> crate::Result<Self> {
         if NVS_INSTANCES.load(core::sync::atomic::Ordering::Relaxed) > 0 {
             log::error!("Cannot spawn new NVS struct, clone original one instead!");
-            return Err(crate::WmError::NvsError);
+            return Err(crate::WmError::Other);
         }
 
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
@@ -47,17 +42,14 @@ impl Nvs {
         flash_size: usize,
         flash: esp_hal::peripherals::FLASH<'static>,
     ) -> crate::Result<Self> {
-        let nvs = tickv::TicKV::<NvsFlash, 1024>::new(
-            NvsFlash::new(flash_offset, unsafe { flash.clone_unchecked() }),
-            unsafe { NVS_READ_BUF },
-            flash_size,
-        );
-        nvs.initialise(hash(tickv::MAIN_KEY))?;
+        let storage = esp_storage::FlashStorage::new(unsafe { flash.clone_unchecked() });
 
         Ok(Nvs {
-            flash_peripheral: flash,
-            tickv: Rc::new(nvs),
-            semaphore: Rc::new(GreedySemaphore::new(1)),
+            inner: Rc::new(Mutex::new(esp_nvs::Nvs::new(
+                flash_offset,
+                flash_size,
+                storage,
+            )?)),
 
             offset: flash_offset,
             size: flash_size,
@@ -110,94 +102,25 @@ impl Nvs {
         nvs_part.map(|(offset, size)| (offset as usize, size as usize))
     }
 
-    pub async fn get_key(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
-        let _drop = self.semaphore.acquire(1).await.unwrap();
-        self.tickv.get_key(hash(key), buf)?;
-        Ok(())
+    pub async fn get<R>(&self, key: &str) -> crate::Result<R>
+    where
+        esp_nvs::Nvs<FlashStorage<'static>>: Get<R>,
+    {
+        let mut d = self.inner.lock().await;
+        return Ok(d.get(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?);
     }
 
-    pub async fn append_key(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
-        let _drop = self.semaphore.acquire(1).await.unwrap();
-        let res = self.tickv.append_key(hash(key), buf);
-        if let Err(e) = res {
-            if e == ErrorCode::UnsupportedVersion {
-                log::error!(
-                    "Unsupported version while appending flash key... Wiping NVS partition!"
-                );
-
-                let mut flash = esp_storage::FlashStorage::new(unsafe {
-                    self.flash_peripheral.clone_unchecked()
-                });
-                let mut written = 0;
-
-                while written < self.size {
-                    let chunk = [0; 1024];
-                    let chunk_size = (self.size - written).min(1024);
-
-                    _ = flash.write((self.offset + written) as u32, &chunk[..chunk_size]);
-                    written += chunk_size;
-                }
-
-                self.tickv.initialise(hash(tickv::MAIN_KEY))?;
-                self.tickv.append_key(hash(key), buf)?;
-            }
-        }
-
-        Ok(())
+    pub async fn set<R>(&self, key: &str, value: R) -> crate::Result<()>
+    where
+        esp_nvs::Nvs<FlashStorage<'static>>: Set<R>,
+    {
+        let mut d = self.inner.lock().await;
+        return Ok(d.set(&WIFIMANAGER_NAMESPACE, &Key::from_str(key), value)?);
     }
 
-    pub async fn invalidate_key(&self, key: &[u8]) -> crate::Result<()> {
-        let _drop = self.semaphore.acquire(1).await.unwrap();
-        self.tickv.invalidate_key(hash(key))?;
-        Ok(())
-    }
-
-    /// # Safety
-    ///
-    /// This doesn't check for semaphore!
-    pub unsafe fn get_key_unchecked(&self, key: &[u8], buf: &mut [u8]) -> crate::Result<()> {
-        self.tickv.get_key(hash(key), buf)?;
-        Ok(())
-    }
-
-    /// # Safety
-    ///
-    /// This doesn't check for semaphore!
-    pub unsafe fn append_key_unckeched(&self, key: &[u8], buf: &[u8]) -> crate::Result<()> {
-        let res = self.tickv.append_key(hash(key), buf);
-        if let Err(e) = res {
-            if e == ErrorCode::UnsupportedVersion {
-                log::error!(
-                    "Unsupported version while appending flash key... Wiping NVS partition!"
-                );
-
-                let mut flash = esp_storage::FlashStorage::new(unsafe {
-                    self.flash_peripheral.clone_unchecked()
-                });
-                let mut written = 0;
-
-                while written < self.size {
-                    let chunk = [0; 1024];
-                    let chunk_size = (self.size - written).min(1024);
-
-                    _ = flash.write((self.offset + written) as u32, &chunk[..chunk_size]);
-                    written += chunk_size;
-                }
-
-                self.tickv.initialise(hash(tickv::MAIN_KEY))?;
-                self.tickv.append_key(hash(key), buf)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// # Safety
-    ///
-    /// This doesn't check for semaphore!
-    pub unsafe fn invalidate_key_unchecked(&self, key: &[u8]) -> crate::Result<()> {
-        self.tickv.invalidate_key(hash(key))?;
-        Ok(())
+    pub async fn delete(&self, key: &str) -> crate::Result<()> {
+        let mut d = self.inner.lock().await;
+        return Ok(d.delete(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?);
     }
 }
 
@@ -212,75 +135,9 @@ impl Clone for Nvs {
         NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
         Self {
-            flash_peripheral: unsafe { self.flash_peripheral.clone_unchecked() },
-            tickv: self.tickv.clone(),
-            semaphore: self.semaphore.clone(),
+            inner: self.inner.clone(),
             offset: self.offset,
             size: self.size,
         }
     }
-}
-
-pub struct NvsFlash {
-    flash_offset: u32,
-    flash: Mutex<CriticalSectionRawMutex, esp_storage::FlashStorage<'static>>,
-}
-
-impl NvsFlash {
-    pub fn new(flash_offset: usize, flash: esp_hal::peripherals::FLASH<'static>) -> Self {
-        Self {
-            flash_offset: flash_offset as u32,
-            flash: Mutex::new(esp_storage::FlashStorage::new(flash)),
-        }
-    }
-}
-
-impl FlashController<1024> for NvsFlash {
-    fn read_region(
-        &self,
-        region_number: usize,
-        buf: &mut [u8; 1024],
-    ) -> Result<(), tickv::ErrorCode> {
-        if let Ok(mut flash) = self.flash.try_lock() {
-            let offset = region_number * 1024;
-            flash
-                .read(self.flash_offset + offset as u32, buf)
-                .map_err(|_| tickv::ErrorCode::ReadFail)
-        } else {
-            Err(tickv::ErrorCode::ReadFail)
-        }
-    }
-
-    fn write(&self, address: usize, buf: &[u8]) -> Result<(), tickv::ErrorCode> {
-        if let Ok(mut flash) = self.flash.try_lock() {
-            flash
-                .write(self.flash_offset + address as u32, buf)
-                .map_err(|_| tickv::ErrorCode::WriteFail)
-        } else {
-            Err(tickv::ErrorCode::WriteFail)
-        }
-    }
-
-    fn erase_region(&self, region_number: usize) -> Result<(), tickv::ErrorCode> {
-        if let Ok(mut flash) = self.flash.try_lock() {
-            flash
-                .write(
-                    self.flash_offset + (region_number as u32 * 1024),
-                    &[0xFF; 1024],
-                )
-                .map_err(|_| tickv::ErrorCode::EraseFail)
-        } else {
-            Err(tickv::ErrorCode::EraseFail)
-        }
-    }
-}
-
-pub fn hash(buf: &[u8]) -> u64 {
-    let mut tmp = 0;
-    for b in buf {
-        tmp ^= *b as u64;
-        tmp <<= 1;
-    }
-
-    tmp
 }

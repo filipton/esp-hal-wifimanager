@@ -22,14 +22,19 @@ pub enum WmError {
     WmTimeout,
 
     WifiControllerStartError,
-    FlashError(tickv::ErrorCode),
     WifiError(WifiError),
     WifiInitalizationError(InitializationError),
     SerdeError(serde_json::Error),
     TaskSpawnError,
-    NvsError,
+    NvsError(esp_nvs::error::Error),
 
     Other,
+}
+
+impl From<esp_nvs::error::Error> for WmError {
+    fn from(value: esp_nvs::error::Error) -> Self {
+        Self::NvsError(value)
+    }
 }
 
 impl From<InitializationError> for WmError {
@@ -47,12 +52,6 @@ impl From<WifiError> for WmError {
 impl From<SpawnError> for WmError {
     fn from(_value: SpawnError) -> Self {
         Self::TaskSpawnError
-    }
-}
-
-impl From<tickv::ErrorCode> for WmError {
-    fn from(value: tickv::ErrorCode) -> Self {
-        Self::FlashError(value)
     }
 }
 
