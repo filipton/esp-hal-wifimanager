@@ -16,7 +16,7 @@ use embassy_net::{Config, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
-use esp_hal::{peripherals::WIFI, rng::Rng};
+use esp_hal::peripherals::WIFI;
 use esp_radio::{
     wifi::{WifiController, WifiDevice, WifiEvent, WifiStaState},
     Controller,
@@ -56,11 +56,11 @@ pub async fn init_wm(
     settings: WmSettings,
     spawner: &Spawner,
     nvs: Option<&Nvs>,
-    mut rng: Rng,
     wifi: WIFI<'static>,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
     ap_start_signal: Option<Rc<Signal<NoopRawMutex, ()>>>,
 ) -> Result<WmReturn> {
+    let mut rng = esp_hal::rng::Rng::new();
     let generated_ssid = settings.ssid.clone();
 
     let init = &*mk_static!(Controller<'static>, esp_radio::init()?);

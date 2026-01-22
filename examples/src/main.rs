@@ -39,7 +39,6 @@ async fn main(spawner: Spawner) {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0);
 
-    let rng = esp_hal::rng::Rng::new();
     let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000, peripherals.FLASH).unwrap();
 
     let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
@@ -57,7 +56,6 @@ async fn main(spawner: Spawner) {
         wm_settings,
         &spawner,
         Some(&nvs),
-        rng.clone(),
         peripherals.WIFI,
         peripherals.BT,
         None,
