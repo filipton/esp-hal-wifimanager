@@ -134,6 +134,7 @@ async fn web_task(
             // parse and handle request
             if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
                 if req.path.starts_with("/update") && req.method.to_uppercase() == "POST" {
+                    #[cfg(feature = "ota")]
                     if handle_update_req(req, &mut socket).await.is_none() {
                         let resp = create_http_response(
                             "500 Internal Server Error",
@@ -186,6 +187,7 @@ async fn web_task(
     embassy_futures::select::select(fut, signals.end_signalled()).await;
 }
 
+#[cfg(feature = "ota")]
 async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> Option<()> {
     let Some(query) = req.path.split("?").nth(1) else {
         return None;
