@@ -27,28 +27,30 @@ embassy-futures = "0.1.2"
 serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
 embedded-io-async = "0.7.0"
-portable-atomic = { version = "1.13.0", default-features = false }
+portable-atomic = { version = "1.13.1", default-features = false }
 trouble-host = { version = "0.5.1", optional = true }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 getrandom = { version = "=0.2.15", features = ["custom"] }
 esp-nvs = "0.2.0"
+esp-hal-ota = { version = "0.4.5", optional = true, features = ["log"] }
 
 [features]
 #default = []
 #default = ["esp32s3", "ap", "ble"]
-default = ["esp32s3", "ap", "ble"]
+default = ["esp32s3", "ap", "ble", "ota"]
 
-esp32s2 = ["esp-hal/esp32s2","esp-radio/esp32s2","esp-rtos/esp32s2","esp-storage/esp32s2", "esp-nvs/esp32s2"]
-esp32s3 = ["esp-hal/esp32s3","esp-radio/esp32s3","esp-rtos/esp32s3","esp-storage/esp32s3", "esp-nvs/esp32s3"]
+esp32s2 = ["esp-hal/esp32s2","esp-radio/esp32s2","esp-rtos/esp32s2","esp-storage/esp32s2", "esp-nvs/esp32s2", "esp-hal-ota?/esp32s2"]
+esp32s3 = ["esp-hal/esp32s3","esp-radio/esp32s3","esp-rtos/esp32s3","esp-storage/esp32s3", "esp-nvs/esp32s3", "esp-hal-ota?/esp32s3"]
 
-esp32c2 = ["esp-hal/esp32c2","esp-radio/esp32c2","esp-rtos/esp32c2","esp-storage/esp32c2", "esp-nvs/esp32c2"]
-esp32c3 = ["esp-hal/esp32c3","esp-radio/esp32c3","esp-rtos/esp32c3","esp-storage/esp32c3", "esp-nvs/esp32c3"]
-esp32c6 = ["esp-hal/esp32c6","esp-radio/esp32c6","esp-rtos/esp32c6","esp-storage/esp32c6", "esp-nvs/esp32c6"]
+esp32c2 = ["esp-hal/esp32c2","esp-radio/esp32c2","esp-rtos/esp32c2","esp-storage/esp32c2", "esp-nvs/esp32c2", "esp-hal-ota?/esp32c2"]
+esp32c3 = ["esp-hal/esp32c3","esp-radio/esp32c3","esp-rtos/esp32c3","esp-storage/esp32c3", "esp-nvs/esp32c3", "esp-hal-ota?/esp32c3"]
+esp32c6 = ["esp-hal/esp32c6","esp-radio/esp32c6","esp-rtos/esp32c6","esp-storage/esp32c6", "esp-nvs/esp32c6", "esp-hal-ota?/esp32c6"]
 
-esp32 = ["esp-hal/esp32","esp-radio/esp32","esp-rtos/esp32","esp-storage/esp32", "esp-nvs/esp32"]
+esp32 = ["esp-hal/esp32","esp-radio/esp32","esp-rtos/esp32","esp-storage/esp32", "esp-nvs/esp32", "esp-hal-ota?/esp32"]
 
 ap = ["dep:esp-hal-dhcp-server"]
 ble = ["dep:trouble-host", "esp-radio/ble", "esp-radio/coex"]
+ota = ["dep:esp-hal-ota"]
 env = []
 
 [profile.dev]

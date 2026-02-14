@@ -6,9 +6,11 @@ use esp_radio::wifi::WifiDevice;
 use crate::structs::WmInnerSignals;
 #[embassy_executor::task]
 pub async fn run_dhcp_server(ap_stack: Stack<'static>) {
-    let mut leaser = esp_hal_dhcp_server::simple_leaser::SingleDhcpLeaser::new(
-        esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 100),
-    );
+    let mut leaser = esp_hal_dhcp_server::simple_leaser::SimpleDhcpLeaser {
+        start: esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 100),
+        end: esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 200),
+        leases: Default::default(),
+    };
 
     let ip = esp_hal_dhcp_server::Ipv4Addr::new(192, 168, 4, 1);
     let res = esp_hal_dhcp_server::run_dhcp_server(

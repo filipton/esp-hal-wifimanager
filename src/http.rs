@@ -3,6 +3,7 @@ use alloc::{format, rc::Rc, vec::Vec};
 use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
+use embedded_io_async::Write;
 
 const WEB_TASK_POOL_SIZE: usize = 2;
 const HTTP_BUFFER_SIZE: usize = 2048;
@@ -10,26 +11,32 @@ const HTTP_BUFFER_SIZE: usize = 2048;
 struct HttpRequest<'a> {
     method: &'a str,
     path: &'a str,
+    headers: &'a [u8],
     body: &'a [u8],
 }
 
 fn parse_http_request(buffer: &[u8]) -> Option<HttpRequest<'_>> {
-    let request = core::str::from_utf8(buffer).ok()?;
-    let mut lines = request.lines();
+    let header_end = buffer.windows(4).position(|window| window == b"\r\n\r\n")?;
 
+    let header_section = core::str::from_utf8(&buffer[..header_end]).ok()?;
+
+    let mut lines = header_section.lines();
     let first_line = lines.next()?;
     let mut parts = first_line.split_whitespace();
     let method = parts.next()?;
     let path = parts.next()?;
 
-    // find body (after \r\n\r\n)
-    let body_start = request
-        .find("\r\n\r\n")
-        .map(|i| i + 4)
-        .unwrap_or(request.len());
-    let body = &buffer[body_start..];
+    let headers_start = header_section.find("\r\n").map(|i| i + 2).unwrap_or(0);
+    let headers = &buffer[headers_start..header_end];
 
-    Some(HttpRequest { method, path, body })
+    let body = &buffer[header_end + 4..];
+
+    Some(HttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn create_http_response(status: &str, content_type: &str, body: &str) -> Vec<u8> {
@@ -47,6 +54,11 @@ fn create_http_response(status: &str, content_type: &str, body: &str) -> Vec<u8>
     response
 }
 
+#[cfg(feature = "ota")]
+const UPDATE_PANEL_HTML: &str = include_str!("update_panel.html");
+#[cfg(not(feature = "ota"))]
+const UPDATE_PANEL_HTML: &str = "<html><body><p>OTA updates disabled</p></body></html>";
+
 async fn handle_request(
     request: HttpRequest<'_>,
     signals: &Rc<WmInnerSignals>,
@@ -54,6 +66,7 @@ async fn handle_request(
 ) -> Vec<u8> {
     match (request.method, request.path) {
         ("GET", "/") => create_http_response("200 OK", "text/html", wifi_panel_str),
+        ("GET", "/update") => create_http_response("200 OK", "text/html", UPDATE_PANEL_HTML),
         ("GET", "/list") => {
             let scan_res = signals.wifi_scan_res.try_lock();
             let resp = match scan_res {
@@ -83,12 +96,12 @@ async fn web_task(
         let mut tx_buffer = [0; 1024];
         let mut http_buffer = alloc::vec![0; HTTP_BUFFER_SIZE];
 
+        let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
+        socket.set_timeout(Some(Duration::from_secs(10)));
+        socket.set_nagle_enabled(false);
         loop {
-            let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-            socket.set_timeout(Some(Duration::from_secs(10)));
-
             if socket.accept(80).await.is_err() {
-                Timer::after(Duration::from_millis(100)).await;
+                Timer::after(Duration::from_millis(5)).await;
                 continue;
             }
 
@@ -120,25 +133,137 @@ async fn web_task(
 
             // parse and handle request
             if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
-                let resp = handle_request(req, &signals, wifi_panel_str).await;
-                let mut i = 0;
+                log::info!("req {}", req.path);
+                if req.path.starts_with("/update") && req.method.to_uppercase() == "POST" {
+                    let Some(query) = req.path.split("?").nth(1) else {
+                        Timer::after_millis(5).await;
+                        let _ = socket.close();
+                        Timer::after_millis(5).await;
+                        socket.abort();
+                        continue;
+                    };
 
-                while i < resp.len() {
-                    match socket.write(&resp[i..]).await {
-                        Ok(n) => {
-                            i += n;
-                        }
-                        Err(e) => {
-                            log::error!("Http wifimanager write error: {e:?}");
-                            break;
+                    let mut query = query.split("&").map(|q| {
+                        let mut split = q.split("=");
+                        (split.next().unwrap(), split.next().unwrap())
+                    });
+
+                    let size: u32 = query
+                        .find(|(k, _)| *k == "size")
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse()
+                        .unwrap();
+
+                    let crc: u32 = query
+                        .find(|(k, _)| *k == "crc")
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse()
+                        .unwrap();
+
+                    log::info!("Start ota update. Size: {size} crc: {crc}");
+                    let headers = core::str::from_utf8(req.headers).unwrap();
+                    let content_length: usize = headers
+                        .split("\r\n")
+                        .map(|h| {
+                            let mut split = h.splitn(2, ": ");
+                            let k = split.next().unwrap();
+                            let v = split.next().unwrap();
+                            (k, v)
+                        })
+                        .find(|(k, _)| k.to_uppercase() == "CONTENT-LENGTH")
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse()
+                        .unwrap();
+
+                    let mut total = req.body.len();
+                    log::info!("read body: {}", req.body.len());
+
+                    let mut ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
+                        esp_hal::peripherals::FLASH::steal()
+                    }))
+                    .unwrap();
+
+                    ota.ota_begin(size, crc).unwrap();
+                    ota.ota_write_chunk(&req.body).unwrap();
+
+                    let mut ota_buffer = [0; 4096];
+                    loop {
+                        match socket.read(&mut ota_buffer).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                total += n;
+                                log::info!("read body: {n} (total: {total})");
+                                let res = ota.ota_write_chunk(&ota_buffer[..n]);
+                                if res == Ok(true) {
+                                    if ota.ota_flush(true, true).is_ok() {
+                                        log::info!("OTA restart!");
+                                        let resp = create_http_response(
+                                            "200 OK",
+                                            "text/plain",
+                                            "OTA Update Successful. Restarting...",
+                                        );
+                                        socket.write_all(&resp).await.unwrap();
+                                        Timer::after(Duration::from_millis(100)).await; // Give time for response to send
+                                        esp_hal::system::software_reset();
+                                    } else {
+                                        log::error!("OTA flash verify failed!");
+                                    }
+                                }
+
+                                if total >= content_length {
+                                    break;
+                                }
+                            }
+                            Err(_) => break,
                         }
                     }
 
-                    _ = socket.flush().await;
+                    let resp = create_http_response("200 OK", "text/html", "Uploaded");
+                    let mut i = 0;
+
+                    while i < resp.len() {
+                        match socket.write(&resp[i..]).await {
+                            Ok(n) => {
+                                i += n;
+                            }
+                            Err(e) => {
+                                log::error!("Http wifimanager write error: {e:?}");
+                                break;
+                            }
+                        }
+
+                        _ = socket.flush().await;
+                    }
+                } else {
+                    let resp = handle_request(req, &signals, wifi_panel_str).await;
+                    let mut i = 0;
+
+                    while i < resp.len() {
+                        match socket.write(&resp[i..]).await {
+                            Ok(n) => {
+                                i += n;
+                            }
+                            Err(e) => {
+                                log::error!("Http wifimanager write error: {e:?}");
+                                break;
+                            }
+                        }
+
+                        _ = socket.flush().await;
+                    }
                 }
             }
 
+            Timer::after_millis(5).await;
             let _ = socket.close();
+            Timer::after_millis(5).await;
+            socket.abort();
         }
     };
 
