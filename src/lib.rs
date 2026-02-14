@@ -230,9 +230,16 @@ async fn wifi_connection_worker(
 
             if wifi_connected {
                 if let Some(nvs) = nvs {
+                    let Ok(setup_info_str) = core::str::from_utf8(&setup_info_buf) else {
+                        log::info!(
+                            "Wifimanager esp reset. Setup info string contains illegal characters."
+                        );
+                        Timer::after_millis(1000).await;
+                        esp_hal::system::software_reset();
+                    };
+
                     _ = nvs.delete(WIFI_NVS_KEY).await;
-                    nvs.set(WIFI_NVS_KEY, core::str::from_utf8(&setup_info_buf).unwrap())
-                        .await?;
+                    nvs.set(WIFI_NVS_KEY, setup_info_str).await?;
                 }
 
                 #[cfg(feature = "ap")]

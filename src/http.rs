@@ -134,145 +134,27 @@ async fn web_task(
             // parse and handle request
             if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
                 if req.path.starts_with("/update") && req.method.to_uppercase() == "POST" {
-                    let Some(query) = req.path.split("?").nth(1) else {
-                        Timer::after_millis(5).await;
-                        let _ = socket.close();
-                        Timer::after_millis(5).await;
-                        socket.abort();
-                        continue;
-                    };
+                    if handle_update_req(req, &mut socket).await.is_none() {
+                        let resp = create_http_response(
+                            "500 Internal Server Error",
+                            "text/plain",
+                            "Update handler failed",
+                        );
+                        let mut i = 0;
 
-                    let mut query = query.split("&").map(|q| {
-                        let mut split = q.split("=");
-                        (split.next().unwrap(), split.next().unwrap())
-                    });
-
-                    let size: u32 = query
-                        .find(|(k, _)| *k == "size")
-                        .unwrap()
-                        .1
-                        .trim()
-                        .parse()
-                        .unwrap();
-
-                    let crc: u32 = query
-                        .find(|(k, _)| *k == "crc")
-                        .unwrap()
-                        .1
-                        .trim()
-                        .parse()
-                        .unwrap();
-
-                    log::info!("Start ota update. Size: {size} crc: {crc}");
-                    let headers = core::str::from_utf8(req.headers).unwrap();
-                    let content_length: usize = headers
-                        .split("\r\n")
-                        .map(|h| {
-                            let mut split = h.splitn(2, ": ");
-                            let k = split.next().unwrap();
-                            let v = split.next().unwrap();
-                            (k, v)
-                        })
-                        .find(|(k, _)| k.to_uppercase() == "CONTENT-LENGTH")
-                        .unwrap()
-                        .1
-                        .trim()
-                        .parse()
-                        .unwrap();
-
-                    let mut ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
-                        esp_hal::peripherals::FLASH::steal()
-                    }))
-                    .unwrap();
-                    ota.ota_begin(size, crc).unwrap();
-
-                    let mut ota_buffer = [0; 4096];
-                    ota_buffer[..req.body.len()].copy_from_slice(&req.body);
-                    let mut buffer_pos = req.body.len();
-                    let mut total = 0;
-
-                    loop {
-                        match socket.read(&mut ota_buffer[buffer_pos..]).await {
-                            Ok(0) => {
-                                if buffer_pos > 0 {
-                                    total += buffer_pos;
-                                    log::info!(
-                                        "read body: {} (total: {}) - final chunk",
-                                        buffer_pos,
-                                        total
-                                    );
-                                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
-                                    if res == Ok(true) {
-                                        if ota.ota_flush(true, true).is_ok() {
-                                            log::info!("OTA restart!");
-                                            let resp = create_http_response(
-                                                "200 OK",
-                                                "text/plain",
-                                                "OTA Update Successful. Restarting...",
-                                            );
-                                            socket.write_all(&resp).await.unwrap();
-                                            Timer::after(Duration::from_millis(100)).await;
-                                            esp_hal::system::software_reset();
-                                        } else {
-                                            log::error!("OTA flash verify failed!");
-                                        }
-                                    }
+                        while i < resp.len() {
+                            match socket.write(&resp[i..]).await {
+                                Ok(n) => {
+                                    i += n;
                                 }
-                                break;
-                            }
-                            Ok(n) => {
-                                buffer_pos += n;
-
-                                if buffer_pos == 4096 || total + buffer_pos >= content_length {
-                                    total += buffer_pos;
-                                    log::info!("read body: {} (total: {})", buffer_pos, total);
-
-                                    let progress_msg =
-                                        format!("PROGRESS:{},{}\n", total, content_length);
-                                    let _ = socket.write_all(progress_msg.as_bytes()).await;
-                                    let _ = socket.flush().await;
-
-                                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
-                                    if res == Ok(true) {
-                                        if ota.ota_flush(true, true).is_ok() {
-                                            log::info!("OTA restart!");
-                                            let final_msg =
-                                                "DONE:OTA Update Successful. Restarting...\n";
-                                            socket.write_all(final_msg.as_bytes()).await.unwrap();
-                                            socket.flush().await.unwrap();
-
-                                            Timer::after(Duration::from_millis(100)).await;
-                                            esp_hal::system::software_reset();
-                                        } else {
-                                            log::error!("OTA flash verify failed!");
-                                        }
-                                    }
-                                    buffer_pos = 0;
-
-                                    if total >= content_length {
-                                        break;
-                                    }
+                                Err(e) => {
+                                    log::error!("Http wifimanager write error: {e:?}");
+                                    break;
                                 }
                             }
-                            Err(_) => break,
+
+                            _ = socket.flush().await;
                         }
-                    }
-
-                    let resp = create_http_response("200 OK", "text/html", "Uploaded");
-                    let mut i = 0;
-
-                    while i < resp.len() {
-                        match socket.write(&resp[i..]).await {
-                            Ok(n) => {
-                                i += n;
-                            }
-                            Err(e) => {
-                                log::error!("Http wifimanager write error: {e:?}");
-                                break;
-                            }
-                        }
-
-                        _ = socket.flush().await;
                     }
                 } else {
                     let resp = handle_request(req, &signals, wifi_panel_str).await;
@@ -302,6 +184,130 @@ async fn web_task(
     };
 
     embassy_futures::select::select(fut, signals.end_signalled()).await;
+}
+
+async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> Option<()> {
+    let Some(query) = req.path.split("?").nth(1) else {
+        return None;
+    };
+
+    let mut query = query.split("&").map(|q| {
+        let mut split = q.split("=");
+        (
+            split.next().unwrap_or_default(),
+            split.next().unwrap_or_default(),
+        )
+    });
+
+    let size: u32 = query.find(|(k, _)| *k == "size")?.1.trim().parse().ok()?;
+    let crc: u32 = query.find(|(k, _)| *k == "crc")?.1.trim().parse().ok()?;
+
+    log::info!("Start ota update. Size: {size} crc: {crc}");
+    let headers = core::str::from_utf8(req.headers).ok()?;
+    let content_length: usize = headers
+        .split("\r\n")
+        .map(|h| {
+            let mut split = h.splitn(2, ": ");
+            let k = split.next().unwrap_or_default();
+            let v = split.next().unwrap_or_default();
+            (k, v)
+        })
+        .find(|(k, _)| k.to_uppercase() == "CONTENT-LENGTH")?
+        .1
+        .trim()
+        .parse()
+        .ok()?;
+
+    let mut ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
+        esp_hal::peripherals::FLASH::steal()
+    }))
+    .ok()?;
+    ota.ota_begin(size, crc).ok()?;
+
+    let mut ota_buffer = [0; 4096];
+    ota_buffer[..req.body.len()].copy_from_slice(&req.body);
+    let mut buffer_pos = req.body.len();
+    let mut total = 0;
+
+    loop {
+        match socket.read(&mut ota_buffer[buffer_pos..]).await {
+            Ok(0) => {
+                if buffer_pos > 0 {
+                    total += buffer_pos;
+                    log::info!("read body: {} (total: {}) - final chunk", buffer_pos, total);
+                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
+                    if res == Ok(true) {
+                        if ota.ota_flush(true, true).is_ok() {
+                            log::info!("OTA restart!");
+                            let resp = create_http_response(
+                                "200 OK",
+                                "text/plain",
+                                "OTA Update Successful. Restarting...",
+                            );
+                            socket.write_all(&resp).await.ok()?;
+                            Timer::after(Duration::from_millis(100)).await;
+                            esp_hal::system::software_reset();
+                        } else {
+                            log::error!("OTA flash verify failed!");
+                        }
+                    }
+                }
+                break;
+            }
+            Ok(n) => {
+                buffer_pos += n;
+
+                if buffer_pos == 4096 || total + buffer_pos >= content_length {
+                    total += buffer_pos;
+                    log::info!("read body: {} (total: {})", buffer_pos, total);
+
+                    let progress_msg = format!("PROGRESS:{},{}\n", total, content_length);
+                    _ = socket.write_all(progress_msg.as_bytes()).await;
+                    _ = socket.flush().await;
+
+                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
+                    if res == Ok(true) {
+                        if ota.ota_flush(true, true).is_ok() {
+                            log::info!("OTA restart!");
+                            let final_msg = "DONE:OTA Update Successful. Restarting...\n";
+                            _ = socket.write_all(final_msg.as_bytes()).await;
+                            _ = socket.flush().await;
+
+                            Timer::after(Duration::from_millis(100)).await;
+                            esp_hal::system::software_reset();
+                        } else {
+                            log::error!("OTA flash verify failed!");
+                        }
+                    }
+                    buffer_pos = 0;
+
+                    if total >= content_length {
+                        break;
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let resp = create_http_response("200 OK", "text/html", "Uploaded");
+    let mut i = 0;
+
+    while i < resp.len() {
+        match socket.write(&resp[i..]).await {
+            Ok(n) => {
+                i += n;
+            }
+            Err(e) => {
+                log::error!("Http wifimanager write error: {e:?}");
+                break;
+            }
+        }
+
+        _ = socket.flush().await;
+    }
+
+    Some(())
 }
 
 pub async fn run_http_server(

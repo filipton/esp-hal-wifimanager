@@ -54,11 +54,13 @@ pub async fn bluetooth_task(
         ..
     } = stack.build();
 
-    let server = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
+    let Ok(server) = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: &name,
         appearance: &appearance::power_device::GENERIC_POWER_DEVICE,
-    }))
-    .unwrap();
+    })) else {
+        log::error!("[ble] New Server failed!");
+        return;
+    };
 
     _ = embassy_futures::select::select3(ble_task(runner), stop_ble_task(&signals), async {
         loop {
@@ -113,7 +115,7 @@ async fn gatt_events_task<P: PacketPool>(
 
                                 _ = server.set(
                                     &server.wifi_service.wifi_scan_res,
-                                    &heapless::String::from_str(wifis).unwrap(),
+                                    &heapless::String::from_str(wifis).unwrap_or_default(),
                                 );
                             }
                         }

@@ -87,10 +87,10 @@ impl Nvs {
 
             let p_type = &bytes[2];
             let p_subtype = &bytes[3];
-            let p_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-            let p_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-            //let p_name = core::str::from_utf8(&bytes[12..28]).unwrap();
-            //let p_flags = u32::from_le_bytes(bytes[28..32].try_into().unwrap());
+            let p_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default());
+            let p_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or_default());
+            //let p_name = core::str::from_utf8(&bytes[12..28]).unwrap_or_default();
+            //let p_flags = u32::from_le_bytes(bytes[28..32].try_into().unwrap_or_default());
             //log::info!("{magic:?} {p_type} {p_subtype} {p_offset} {p_size} {p_name} {p_flags}");
 
             if *p_type == 1 && *p_subtype == 2 {
