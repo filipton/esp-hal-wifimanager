@@ -242,6 +242,37 @@
             background: none;
             border: none;
         }
+
+        .update-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(102, 126, 234, 0.3);
+        }
+
+        .update-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px -1px rgba(102, 126, 234, 0.4);
+        }
+
+        .update-button:active {
+            transform: translateY(0);
+        }
+
+        .update-icon {
+            font-size: 1.25rem;
+        }
     </style>
 </head>
 <body>
@@ -267,7 +298,10 @@
 
         <div class="section">
             <h2>Firmware Update</h2>
-            <button onclick="window.location.href='/update_panel'">Go to Update Page</button>
+            <button class="update-button" onclick="window.location.href='/update'">
+                <span class="update-icon">🔄</span>
+                <span>Go to Update Page</span>
+            </button>
         </div>
     </div>
 

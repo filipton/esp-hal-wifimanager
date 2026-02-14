@@ -55,7 +55,7 @@ fn create_http_response(status: &str, content_type: &str, body: &str) -> Vec<u8>
 }
 
 #[cfg(feature = "ota")]
-const UPDATE_PANEL_HTML: &str = include_str!("update_panel.html");
+const UPDATE_PANEL_HTML: &str = include_str!("update.html");
 #[cfg(not(feature = "ota"))]
 const UPDATE_PANEL_HTML: &str = "<html><body><p>OTA updates disabled</p></body></html>";
 
@@ -133,7 +133,6 @@ async fn web_task(
 
             // parse and handle request
             if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
-                log::info!("req {}", req.path);
                 if req.path.starts_with("/update") && req.method.to_uppercase() == "POST" {
                     let Some(query) = req.path.split("?").nth(1) else {
                         Timer::after_millis(5).await;
@@ -181,43 +180,78 @@ async fn web_task(
                         .parse()
                         .unwrap();
 
-                    let mut total = req.body.len();
-                    log::info!("read body: {}", req.body.len());
-
                     let mut ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
                         esp_hal::peripherals::FLASH::steal()
                     }))
                     .unwrap();
-
                     ota.ota_begin(size, crc).unwrap();
-                    ota.ota_write_chunk(&req.body).unwrap();
 
                     let mut ota_buffer = [0; 4096];
+                    ota_buffer[..req.body.len()].copy_from_slice(&req.body);
+                    let mut buffer_pos = req.body.len();
+                    let mut total = 0;
+
                     loop {
-                        match socket.read(&mut ota_buffer).await {
-                            Ok(0) => break,
-                            Ok(n) => {
-                                total += n;
-                                log::info!("read body: {n} (total: {total})");
-                                let res = ota.ota_write_chunk(&ota_buffer[..n]);
-                                if res == Ok(true) {
-                                    if ota.ota_flush(true, true).is_ok() {
-                                        log::info!("OTA restart!");
-                                        let resp = create_http_response(
-                                            "200 OK",
-                                            "text/plain",
-                                            "OTA Update Successful. Restarting...",
-                                        );
-                                        socket.write_all(&resp).await.unwrap();
-                                        Timer::after(Duration::from_millis(100)).await; // Give time for response to send
-                                        esp_hal::system::software_reset();
-                                    } else {
-                                        log::error!("OTA flash verify failed!");
+                        match socket.read(&mut ota_buffer[buffer_pos..]).await {
+                            Ok(0) => {
+                                if buffer_pos > 0 {
+                                    total += buffer_pos;
+                                    log::info!(
+                                        "read body: {} (total: {}) - final chunk",
+                                        buffer_pos,
+                                        total
+                                    );
+                                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
+                                    if res == Ok(true) {
+                                        if ota.ota_flush(true, true).is_ok() {
+                                            log::info!("OTA restart!");
+                                            let resp = create_http_response(
+                                                "200 OK",
+                                                "text/plain",
+                                                "OTA Update Successful. Restarting...",
+                                            );
+                                            socket.write_all(&resp).await.unwrap();
+                                            Timer::after(Duration::from_millis(100)).await;
+                                            esp_hal::system::software_reset();
+                                        } else {
+                                            log::error!("OTA flash verify failed!");
+                                        }
                                     }
                                 }
+                                break;
+                            }
+                            Ok(n) => {
+                                buffer_pos += n;
 
-                                if total >= content_length {
-                                    break;
+                                if buffer_pos == 4096 || total + buffer_pos >= content_length {
+                                    total += buffer_pos;
+                                    log::info!("read body: {} (total: {})", buffer_pos, total);
+
+                                    let progress_msg =
+                                        format!("PROGRESS:{},{}\n", total, content_length);
+                                    let _ = socket.write_all(progress_msg.as_bytes()).await;
+                                    let _ = socket.flush().await;
+
+                                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
+                                    if res == Ok(true) {
+                                        if ota.ota_flush(true, true).is_ok() {
+                                            log::info!("OTA restart!");
+                                            let final_msg =
+                                                "DONE:OTA Update Successful. Restarting...\n";
+                                            socket.write_all(final_msg.as_bytes()).await.unwrap();
+                                            socket.flush().await.unwrap();
+
+                                            Timer::after(Duration::from_millis(100)).await;
+                                            esp_hal::system::software_reset();
+                                        } else {
+                                            log::error!("OTA flash verify failed!");
+                                        }
+                                    }
+                                    buffer_pos = 0;
+
+                                    if total >= content_length {
+                                        break;
+                                    }
                                 }
                             }
                             Err(_) => break,

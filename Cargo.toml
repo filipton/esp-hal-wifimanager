@@ -32,7 +32,7 @@ trouble-host = { version = "0.5.1", optional = true }
 rand_core = { version = "0.6.4", features = ["getrandom"] }
 getrandom = { version = "=0.2.15", features = ["custom"] }
 esp-nvs = "0.2.0"
-esp-hal-ota = { version = "0.4.5", optional = true, features = ["log"] }
+esp-hal-ota = { version = "0.4.6", optional = true, features = ["log"] }
 
 [features]
 #default = []

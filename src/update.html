@@ -15,14 +15,12 @@
             --border-color: #e2e8f0;
             --hover-color: #f1f5f9;
         }
-
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
         }
-
         body {
             background-color: var(--background-color);
             color: var(--text-color);
@@ -32,7 +30,6 @@
             justify-content: center;
             align-items: center;
         }
-
         .container {
             width: 100%;
             max-width: 500px;
@@ -44,14 +41,12 @@
             flex-direction: column;
             gap: 1.5rem;
         }
-
         h1 {
             font-size: clamp(1.5rem, 5vw, 1.875rem);
             font-weight: bold;
             text-align: center;
             color: var(--primary-color);
         }
-
         input[type="file"] {
             width: 100%;
             padding: 0.75rem;
@@ -62,13 +57,11 @@
             cursor: pointer;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-
         input[type="file"]:focus {
             outline: none;
             border-color: var(--primary-color);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
-
         button {
             background-color: var(--primary-color);
             color: white;
@@ -81,11 +74,46 @@
             transition: background-color 0.2s ease;
             width: 100%;
         }
-
-        button:hover {
+        button:hover:not(:disabled) {
             background-color: #1d4ed8;
         }
-
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .progress-container {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .progress-container.visible {
+            display: flex;
+        }
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 24px;
+            background-color: var(--hover-color);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #3b82f6);
+            width: 0%;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .progress-text {
+            font-size: 0.875rem;
+            color: var(--text-color);
+            text-align: center;
+        }
         #status {
             margin-top: 0.5rem;
             padding: 1rem;
@@ -94,19 +122,16 @@
             line-height: 1.4;
             word-wrap: break-word;
         }
-
         .success {
             background-color: #d4edda;
             color: #155724;
             border: 1px solid #c3e6cb;
         }
-
         .error {
             background-color: #f8d7da;
             color: #721c24;
             border: 1px solid #f5c6cb;
         }
-
         .info {
             background-color: #e2e3e5;
             color: #383d41;
@@ -118,10 +143,17 @@
     <div class="container">
         <h1>OTA Firmware Update</h1>
         <input type="file" id="firmwareFile" accept=".bin">
-        <button onclick="uploadFirmware()">Upload and Update</button>
+        <button id="uploadBtn" onclick="uploadFirmware()">Upload and Update</button>
+        
+        <div id="progressContainer" class="progress-container">
+            <div class="progress-bar-wrapper">
+                <div id="progressBar" class="progress-bar">0%</div>
+            </div>
+            <div id="progressText" class="progress-text">Uploading...</div>
+        </div>
+        
         <div id="status" class="info">Select a firmware file (.bin) to update.</div>
     </div>
-
     <script>
         const CRC_32_TAB = [
             0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
@@ -140,7 +172,7 @@
             0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0, 0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9,
             0x5005713c, 0x270241aa, 0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
             0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81, 0xb7bd5c3b, 0xc0ba6cad,
-            0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a, 0xeaD54739, 0x9dd277af, 0x04db2615, 0x73dc1683,
+            0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a, 0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683,
             0xe3630b12, 0x94643b84, 0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
             0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb, 0x196c3671, 0x6e6b06e7,
             0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc, 0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5,
@@ -159,73 +191,127 @@
         ];
 
         function calc_crc32(buf, initialCrc) {
-            let crc = ~initialCrc; // Equivalent to crc = !initialCrc;
+            let crc = ~initialCrc;
             for (let i = 0; i < buf.length; i++) {
                 let elem = buf[i];
                 let crc_idx = (crc ^ elem) & 0xFF;
                 crc = CRC_32_TAB[crc_idx] ^ (crc >>> 8);
             }
-            return (~crc) >>> 0; // Equivalent to crc ^ 0xFFFFFFFF and convert to unsigned 32-bit
+            return (~crc) >>> 0;
+        }
+
+        function updateProgress(percent, text) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressContainer = document.getElementById('progressContainer');
+            
+            progressContainer.classList.add('visible');
+            progressBar.style.width = percent + '%';
+            progressBar.textContent = Math.round(percent) + '%';
+            if (text) {
+                progressText.textContent = text;
+            }
+        }
+
+        function hideProgress() {
+            document.getElementById('progressContainer').classList.remove('visible');
         }
 
         async function uploadFirmware() {
             const fileInput = document.getElementById('firmwareFile');
             const statusDiv = document.getElementById('status');
+            const uploadBtn = document.getElementById('uploadBtn');
             const file = fileInput.files[0];
-            
+
             if (!file) {
                 statusDiv.className = 'error';
                 statusDiv.textContent = 'Please select a firmware file.';
                 return;
             }
-            
+
+            uploadBtn.disabled = true;
             statusDiv.className = 'info';
             statusDiv.textContent = 'Reading file...';
-            
-            const arrayBuffer = await file.arrayBuffer();
-            const byteArray = new Uint8Array(arrayBuffer);
-            const fileSize = byteArray.length;
-            const fileCrc = calc_crc32(byteArray, 0x0);
-            
-            const maxRetries = 10;
-            
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-                try {
-                    statusDiv.textContent = `Attempt ${attempt}/${maxRetries}: Uploading ${fileSize} bytes (CRC: 0x${fileCrc.toString(16)})...`;
-                    
-                    const response = await fetch(`/update?size=${fileSize}&crc=${fileCrc}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/octet-stream',
-                            'Connection': 'close'
-                        },
-                        body: byteArray
-                    });
-                    
-                    if (response.ok) {
-                        const text = await response.text();
-                        statusDiv.className = 'success';
-                        statusDiv.textContent = `Update successful: ${text}`;
-                        return; // Success - exit function
-                    } else {
-                        const errorText = await response.text();
-                        throw new Error(`${response.status} - ${errorText}`);
-                    }
-                    
-                } catch (error) {
-                    console.error(`Attempt ${attempt} failed:`, error);
-                    
-                    if (attempt === maxRetries) {
-                        // Final attempt failed
-                        statusDiv.className = 'error';
-                        statusDiv.textContent = `Upload failed after ${maxRetries} attempts: ${error.message}`;
-                    } else {
-                        // Retry after short delay
-                        statusDiv.className = 'info';
-                        statusDiv.textContent = `Attempt ${attempt} failed. Retrying...`;
-                        await new Promise(resolve => setTimeout(resolve, 1000));
+            hideProgress();
+
+            let updateComplete = false;
+            let finalMessage = '';
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const byteArray = new Uint8Array(arrayBuffer);
+                const fileSize = byteArray.length;
+                const fileCrc = calc_crc32(byteArray, 0x0);
+
+                statusDiv.textContent = `File read. Size: ${fileSize} bytes, CRC: 0x${fileCrc.toString(16)}. Uploading...`;
+                updateProgress(0, 'Starting upload...');
+
+                const response = await fetch(`/update?size=${fileSize}&crc=${fileCrc}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/octet-stream'
+                    },
+                    body: byteArray
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Read the response stream for progress updates
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = decoder.decode(value, { stream: true });
+                    const lines = text.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('PROGRESS:')) {
+                            // Format: PROGRESS:received,total
+                            const parts = line.substring(9).split(',');
+                            const received = parseInt(parts[0]);
+                            const total = parseInt(parts[1]);
+                            const percent = (received / total) * 100;
+                            updateProgress(percent, `Received: ${received} / ${total} bytes`);
+                        } else if (line.startsWith('DONE:')) {
+                            updateComplete = true;
+                            finalMessage = line.substring(5);
+                        } else if (line.trim()) {
+                            finalMessage = line;
+                        }
                     }
                 }
+
+                // If we got DONE message, update was successful
+                if (updateComplete) {
+                    updateProgress(100, 'Upload complete!');
+                    statusDiv.className = 'success';
+                    statusDiv.textContent = `Update successful: ${finalMessage || 'Device is restarting...'}`;
+                } else {
+                    // No DONE message received
+                    statusDiv.className = 'info';
+                    statusDiv.textContent = 'Upload completed but no confirmation received.';
+                }
+
+            } catch (error) {
+                // Only show error if update wasn't marked as complete
+                if (!updateComplete) {
+                    hideProgress();
+                    statusDiv.className = 'error';
+                    statusDiv.textContent = `An error occurred: ${error.message}`;
+                    console.error('Upload error:', error);
+                } else {
+                    // Update was complete, connection just closed (expected due to device reset)
+                    updateProgress(100, 'Upload complete!');
+                    statusDiv.className = 'success';
+                    statusDiv.textContent = `Update successful: ${finalMessage || 'Device is restarting...'}`;
+                }
+            } finally {
+                uploadBtn.disabled = false;
             }
         }
     </script>
