@@ -127,7 +127,7 @@ async fn web_task(
             }
 
             if total_read == 0 {
-                let _ = socket.close();
+                socket.close();
                 continue;
             }
 
@@ -178,7 +178,7 @@ async fn web_task(
             }
 
             Timer::after_millis(5).await;
-            let _ = socket.close();
+            socket.close();
             Timer::after_millis(5).await;
             socket.abort();
         }
@@ -189,9 +189,7 @@ async fn web_task(
 
 #[cfg(feature = "ota")]
 async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> Option<()> {
-    let Some(query) = req.path.split("?").nth(1) else {
-        return None;
-    };
+    let query = req.path.split("?").nth(1)?;
 
     let mut query = query.split("&").map(|q| {
         let mut split = q.split("=");
@@ -227,7 +225,7 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> 
     ota.ota_begin(size, crc).ok()?;
 
     let mut ota_buffer = [0; 4096];
-    ota_buffer[..req.body.len()].copy_from_slice(&req.body);
+    ota_buffer[..req.body.len()].copy_from_slice(req.body);
     let mut buffer_pos = req.body.len();
     let mut total = 0;
 

@@ -11,8 +11,9 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::string::String;
 use core::ops::DerefMut;
+use core::str::FromStr;
 use embassy_executor::Spawner;
-use embassy_net::{Config, Runner, StackResources};
+use embassy_net::{Config, DhcpConfig, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -46,7 +47,7 @@ macro_rules! mk_static {
     ($t:ty,$val:expr) => {{
         static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
         #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write(($val));
+        let x = STATIC_CELL.uninit().write($val);
         x
     }};
 }
@@ -157,7 +158,10 @@ pub async fn init_wm(
         wifi_setup.data
     };
 
-    let sta_config = Config::dhcpv4(Default::default());
+    let mut dhcp_config = DhcpConfig::default();
+    dhcp_config.hostname = heapless08::String::from_str(&settings.ssid).ok();
+
+    let sta_config = Config::dhcpv4(dhcp_config);
     let (sta_stack, runner) = embassy_net::new(
         interfaces.sta,
         sta_config,

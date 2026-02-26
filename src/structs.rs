@@ -75,7 +75,7 @@ impl From<core::convert::Infallible> for WmError {
 
 #[derive(Clone)]
 pub struct WmSettings {
-    /// SSID and ble name
+    /// SSID, ble name and dhcp4 hostname
     pub ssid: String,
 
     /// Panel hosted on AP (html)

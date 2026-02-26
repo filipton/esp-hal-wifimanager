@@ -107,7 +107,7 @@ impl Nvs {
         esp_nvs::Nvs<FlashStorage<'static>>: Get<R>,
     {
         let mut d = self.inner.lock().await;
-        return Ok(d.get(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?);
+        Ok(d.get(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?)
     }
 
     pub async fn set<R>(&self, key: &str, value: R) -> crate::Result<()>
@@ -115,12 +115,12 @@ impl Nvs {
         esp_nvs::Nvs<FlashStorage<'static>>: Set<R>,
     {
         let mut d = self.inner.lock().await;
-        return Ok(d.set(&WIFIMANAGER_NAMESPACE, &Key::from_str(key), value)?);
+        Ok(d.set(&WIFIMANAGER_NAMESPACE, &Key::from_str(key), value)?)
     }
 
     pub async fn delete(&self, key: &str) -> crate::Result<()> {
         let mut d = self.inner.lock().await;
-        return Ok(d.delete(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?);
+        Ok(d.delete(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?)
     }
 }
 
