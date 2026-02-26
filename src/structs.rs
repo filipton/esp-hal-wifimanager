@@ -73,7 +73,7 @@ impl From<core::convert::Infallible> for WmError {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct WmSettings {
     /// SSID and ble name
     pub ssid: String,
@@ -96,6 +96,30 @@ pub struct WmSettings {
 
     /// Indicates if esp should restart after succesfull first connection
     pub esp_restart_after_connection: bool,
+
+    /// Signal that will be sent when wifi peripheral sends StaDisconnected or WifiConnected
+    pub wifi_conn_signal: Option<Rc<Signal<CriticalSectionRawMutex, bool>>>,
+}
+
+impl core::fmt::Debug for WmSettings {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WmSettings")
+            .field("ssid", &self.ssid)
+            .field("wifi_panel", &self.wifi_panel)
+            .field("wifi_conn_timeout", &self.wifi_conn_timeout)
+            .field("wifi_reconnect_time", &self.wifi_reconnect_time)
+            .field("wifi_scan_interval", &self.wifi_scan_interval)
+            .field("esp_reset_timeout", &self.esp_reset_timeout)
+            .field(
+                "esp_restart_after_connection",
+                &self.esp_restart_after_connection,
+            )
+            .field(
+                "wifi_conn_signal",
+                &self.wifi_conn_signal.as_ref().map(|_| "Assigned"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -132,6 +156,8 @@ impl Default for WmSettings {
 
             esp_reset_timeout: None,
             esp_restart_after_connection: false,
+
+            wifi_conn_signal: None,
         }
     }
 }

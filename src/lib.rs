@@ -174,6 +174,7 @@ pub async fn init_wm(
         settings.wifi_reconnect_time,
         controller,
         stop_signal.clone(),
+        settings.wifi_conn_signal.clone(),
     ))?;
     spawner.spawn(sta_task(runner))?;
 
@@ -284,7 +285,7 @@ async fn connection(
     wifi_reconnect_time: u64,
     mut controller: WifiController<'static>,
     stop_signal: Rc<Signal<CriticalSectionRawMutex, bool>>,
-    //stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    wifi_conn_signal: Option<Rc<Signal<CriticalSectionRawMutex, bool>>>,
 ) {
     log::info!("WIFI Device capabilities: {:?}", controller.capabilities());
 
@@ -298,7 +299,11 @@ async fn connection(
             .await;
 
             match res {
-                embassy_futures::select::Either::First(_) => {}
+                embassy_futures::select::Either::First(_) => {
+                    if let Some(ref sig) = wifi_conn_signal {
+                        sig.signal(false);
+                    }
+                }
                 embassy_futures::select::Either::Second(val) => {
                     if val {
                         _ = controller.disconnect_async().await;
@@ -326,9 +331,17 @@ async fn connection(
 
         match controller.connect_async().await {
             Ok(_) => {
+                if let Some(ref sig) = wifi_conn_signal {
+                    sig.signal(true);
+                }
+
                 log::info!("Wifi connected!");
             }
             Err(e) => {
+                if let Some(ref sig) = wifi_conn_signal {
+                    sig.signal(false);
+                }
+
                 log::info!("Failed to connect to wifi: {e:?}");
                 Timer::after(Duration::from_millis(wifi_reconnect_time)).await
             }
