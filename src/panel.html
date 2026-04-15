@@ -1,329 +1,544 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         :root {
-            --primary-color: #2563eb;
-            --error-color: #dc2626;
-            --success-color: #16a34a;
-            --background-color: #f8fafc;
-            --card-background: #ffffff;
-            --text-color: #1e293b;
-            --border-color: #e2e8f0;
-            --hover-color: #f1f5f9;
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --hover: #f1f5f9;
+            --success: #16a34a;
+            --error: #dc2626;
+            --signal-high: #16a34a;
+            --signal-mid: #d97706;
+            --signal-low: #dc2626;
+            --radius: 10px;
+            --radius-sm: 6px;
         }
 
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
         }
 
         body {
-            background-color: var(--background-color);
-            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            padding: clamp(1rem, 5vw, 2rem);
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
+            padding: clamp(1rem, 5vw, 2rem);
         }
 
         .container {
             width: 100%;
-            max-width: 90%;
-            background-color: var(--card-background);
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            padding: clamp(1rem, 5vw, 2rem);
+            max-width: 520px;
         }
 
-        h1 {
-            font-size: clamp(1.5rem, 5vw, 1.875rem);
-            font-weight: bold;
-            margin-bottom: 1.5rem;
-            text-align: center;
-        }
-
-        h2 {
-            font-size: clamp(1.125rem, 4vw, 1.25rem);
+        .page-title {
+            font-size: 1.375rem;
             font-weight: 600;
-            margin-bottom: 1rem;
+            color: var(--text);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
-        .section {
-            margin-bottom: 2rem;
+        .page-title svg {
+            color: var(--primary);
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 0.875rem 1.125rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .card-title {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+        }
+
+        .scan-badge {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .pulse-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--signal-high);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.3;
+            }
         }
 
         #list {
             display: flex;
             flex-direction: column;
-            gap: 0.5rem;
         }
 
         .network-item {
             display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
             align-items: center;
-            padding: 1rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
+            gap: 12px;
+            padding: 0.75rem 1.125rem;
             cursor: pointer;
-            transition: background-color 0.2s ease;
+            transition: background 0.15s;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .network-item:last-child {
+            border-bottom: none;
         }
 
         .network-item:hover {
-            background-color: var(--hover-color);
+            background: var(--hover);
         }
 
-        .network-info {
+        .wifi-icon-wrap {
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-sm);
+            background: var(--hover);
             display: flex;
             align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .network-name {
+            font-size: 0.9375rem;
+            font-weight: 500;
+            flex: 1;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .signal-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .signal-pct {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 32px;
+            text-align: right;
+        }
+
+        .signal-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 16px;
+        }
+
+        .bar {
+            width: 4px;
+            border-radius: 2px;
+            background: var(--border);
+        }
+
+        .bar.b1 {
+            height: 5px;
+        }
+
+        .bar.b2 {
+            height: 8px;
+        }
+
+        .bar.b3 {
+            height: 11px;
+        }
+
+        .bar.b4 {
+            height: 14px;
+        }
+
+        .bar.lit-high {
+            background: var(--signal-high);
+        }
+
+        .bar.lit-mid {
+            background: var(--signal-mid);
+        }
+
+        .bar.lit-low {
+            background: var(--signal-low);
+        }
+
+        .chevron {
+            color: var(--text-muted);
+            flex-shrink: 0;
+            opacity: 0.4;
+        }
+
+        .card-body {
+            padding: 1.125rem;
+            display: flex;
+            flex-direction: column;
             gap: 0.75rem;
         }
 
-        .wifi-icon {
-            color: var(--text-color);
-            opacity: 0.6;
-        }
-
-        .signal-strength {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
-
-        .signal-bar {
-            width: 80px;
-            height: 8px;
-            background-color: var(--border-color);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .signal-level {
-            height: 100%;
-            background: linear-gradient(90deg, var(--primary-color), #60a5fa);
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-
-        #panel {
+        .input-group {
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 0.3rem;
+        }
+
+        .input-label {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }
 
         input[type="text"],
         input[type="password"] {
             width: 100%;
-            padding: 0.75rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            padding: 0.625rem 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 0.9375rem;
+            color: var(--text);
+            background: var(--surface);
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
 
         input[type="text"]:focus,
         input[type="password"]:focus {
             outline: none;
-            border-color: var(--primary-color);
+            border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
 
-        button[type="submit"] {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 0.75rem;
+        .pw-wrap {
+            position: relative;
+        }
+
+        .pw-wrap input {
+            padding-right: 2.5rem;
+        }
+
+        .pw-toggle {
+            position: absolute;
+            right: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
             border: none;
-            border-radius: 8px;
-            font-size: 1rem;
+            cursor: pointer;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            padding: 0;
+            transition: color 0.15s;
+        }
+
+        .pw-toggle:hover {
+            color: var(--text);
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.625rem 0.875rem;
+            background: var(--hover);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+        }
+
+        .toggle-label {
+            font-size: 0.9rem;
+            color: var(--text);
+            user-select: none;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+            position: absolute;
+        }
+
+        .toggle-track {
+            position: absolute;
+            inset: 0;
+            background: var(--border);
+            border-radius: 20px;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+
+        .toggle-track:before {
+            content: "";
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            left: 3px;
+            top: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+        }
+
+        .toggle-switch input:checked+.toggle-track {
+            background: var(--primary);
+        }
+
+        .toggle-switch input:checked+.toggle-track:before {
+            transform: translateX(16px);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 0.7rem 1rem;
+            font-size: 0.9375rem;
             font-weight: 500;
             cursor: pointer;
-            transition: background-color 0.2s ease;
             width: 100%;
+            transition: background 0.15s, transform 0.1s;
         }
 
-        button[type="submit"]:hover {
-            background-color: #1d4ed8;
+        .btn-primary:hover {
+            background: var(--primary-dark);
         }
 
-        .notification {
-            position: fixed;
-            top: 1rem;
-            right: 1rem;
-            padding: 1rem 1.5rem;
-            border-radius: 8px;
-            color: white;
-            max-width: 90%;
-            display: none;
-            animation: slideIn 0.3s ease-out;
-            z-index: 1000;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        .btn-primary:active {
+            transform: scale(0.99);
         }
 
-        .notification.success {
-            background-color: var(--success-color);
+        .btn-update {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.7rem 1rem;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: background 0.15s;
+            text-decoration: none;
         }
 
-        .notification.error {
-            background-color: var(--error-color);
-        }
-
-        @keyframes slideIn {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
+        .btn-update:hover {
+            background: var(--hover);
         }
 
         .modal-overlay {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.4);
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
             backdrop-filter: blur(2px);
             display: none;
             justify-content: center;
             align-items: center;
-            z-index: 1000;
+            z-index: 100;
+            padding: 1rem;
         }
 
         .modal {
-            background-color: var(--card-background);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
             padding: 1.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            max-width: 90%;
-            width: 400px;
-            position: relative;
-        }
-
-        .modal-content {
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-
-        .modal-close {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 0.5rem 1rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background-color 0.2s ease;
+            max-width: 380px;
             width: 100%;
-        }
-
-        .modal-close:hover {
-            background-color: #1d4ed8;
-        }
-
-        .password-container {
-            position: relative;
             display: flex;
-            align-items: center;
-        }
-        .show-password {
-            margin-left: 10px;
-            cursor: pointer;
-            font-size: 1rem;
-            background: none;
-            border: none;
+            flex-direction: column;
+            gap: 1rem;
         }
 
-        .update-button {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 1rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            width: 100%;
+        .modal-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #dcfce7;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 0.75rem;
-            box-shadow: 0 4px 6px -1px rgba(102, 126, 234, 0.3);
+            margin: 0 auto;
         }
 
-        .update-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 12px -1px rgba(102, 126, 234, 0.4);
+        .modal-title {
+            font-size: 1rem;
+            font-weight: 600;
+            text-align: center;
         }
 
-        .update-button:active {
-            transform: translateY(0);
+        .modal-body {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            text-align: center;
+            line-height: 1.6;
         }
 
-        .update-icon {
-            font-size: 1.25rem;
+        .empty-state {
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.9rem;
         }
     </style>
 </head>
+
 <body>
     <div class="container">
-        <h1>WiFi Setup</h1>
-        
-        <div class="section">
-            <h2>Available Networks</h2>
-            <div id="list"></div>
+        <h1 class="page-title">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd"
+                    d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z"
+                    clip-rule="evenodd" />
+            </svg>
+            WiFi Setup
+        </h1>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Available Networks</span>
+                <span class="scan-badge"><span class="pulse-dot"></span> Scanning</span>
+            </div>
+            <div id="list">
+                <div class="empty-state">Searching for networks…</div>
+            </div>
         </div>
 
-        <div class="section">
-            <h2>WiFi Credentials</h2>
-            <form id="panel">
-                <input id="ssid" type="text" placeholder="Enter SSID..." />
-                <div class="password-container">
-                    <input id="psk" type="password" placeholder="Enter Password..." />
-                    <button type="button" class="show-password" id="togglePassword">👁️</button>
-                </div>
-                <button type="submit">Connect to Network</button>
-            </form>
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Credentials</span>
+            </div>
+            <div class="card-body">
+                <form id="panel" style="display:contents">
+                    <div class="input-group">
+                        <label class="input-label" for="ssid">Network name (SSID)</label>
+                        <input id="ssid" type="text" placeholder="e.g. MyHomeNetwork" />
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label" for="psk">Password</label>
+                        <div class="pw-wrap">
+                            <input id="psk" type="password" placeholder="Enter password" />
+                            <button type="button" class="pw-toggle" id="togglePassword"
+                                aria-label="Toggle password visibility">
+                                <svg id="eyeIcon" width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                    <path fill-rule="evenodd"
+                                        d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                        clip-rule="evenodd" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-primary">Connect to Network</button>
+                </form>
+            </div>
         </div>
 
-        <div class="section">
-            <h2>Firmware Update</h2>
-            <button class="update-button" onclick="window.location.href='/update'">
-                <span class="update-icon">🔄</span>
-                <span>Go to Update Page</span>
-            </button>
+        <div class="card">
+            <div class="card-body">
+                <a href="/update" class="btn-update">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Firmware Update
+                </a>
+            </div>
         </div>
     </div>
 
     <div id="modal-overlay" class="modal-overlay">
         <div class="modal">
-            <div class="modal-content" id="modal-message"></div>
-            <button class="modal-close" id="modal-close">Close</button>
+            <div class="modal-icon">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="#16a34a">
+                    <path fill-rule="evenodd"
+                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                        clip-rule="evenodd" />
+                </svg>
+            </div>
+            <p class="modal-title">Credentials sent</p>
+            <p class="modal-body" id="modal-message"></p>
+            <button class="btn-primary" id="modal-close">Got it</button>
         </div>
     </div>
 
     <script>
         const passwordInput = document.getElementById("psk");
-        const togglePasswordButton = document.getElementById("togglePassword");
+        const toggleBtn = document.getElementById("togglePassword");
+        const eyeIcon = document.getElementById("eyeIcon");
 
-        togglePasswordButton.addEventListener("click", () => {
-            if (passwordInput.type === "password") {
-                passwordInput.type = "text";
-                togglePasswordButton.textContent = "🔒";
-            } else {
-                passwordInput.type = "password";
-                togglePasswordButton.textContent = "👁️";
-            }
+        const eyeOpen = `<path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/><path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>`;
+        const eyeClosed = `<path fill-rule="evenodd" d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z" clip-rule="evenodd"/><path d="M12.454 16.697L9.75 13.992a4 4 0 01-3.742-3.741L2.335 6.578A9.98 9.98 0 00.458 10c1.274 4.057 5.064 7 9.542 7 .847 0 1.669-.105 2.454-.303z"/>`;
+
+        toggleBtn.addEventListener("click", () => {
+            const show = passwordInput.type === "password";
+            passwordInput.type = show ? "text" : "password";
+            eyeIcon.innerHTML = show ? eyeClosed : eyeOpen;
         });
 
         let connecting = false;
@@ -331,128 +546,111 @@
         let listInterval;
 
         function showModal(message) {
-            const modalOverlay = document.getElementById('modal-overlay');
-            const modalMessage = document.getElementById('modal-message');
-            
-            modalMessage.textContent = message;
-            modalOverlay.style.display = 'flex';
+            document.getElementById("modal-message").textContent = message;
+            document.getElementById("modal-overlay").style.display = "flex";
         }
 
         function hideModal() {
-            const modalOverlay = document.getElementById('modal-overlay');
-            modalOverlay.style.display = 'none';
+            document.getElementById("modal-overlay").style.display = "none";
         }
 
-        document.getElementById('modal-close').addEventListener('click', hideModal);
+        document.getElementById("modal-close").addEventListener("click", hideModal);
 
-        document.getElementById("panel").addEventListener("submit", async (event) => {
-            event.preventDefault();
+        document.getElementById("panel").addEventListener("submit", async (e) => {
+            e.preventDefault();
             const ssid = document.getElementById("ssid").value;
             const psk = document.getElementById("psk").value;
+            let requestData = {ssid, psk, data: {}};
 
-            try {
-                let response = await fetch("/setup", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ssid, psk })
-                });
-            } catch (error) {
-            }
-        });
-
-        const panel = document.querySelector("#panel");
-        panel.addEventListener("submit", async (e) => {
-            e.preventDefault();
-            let json = JSON.stringify({
-                ssid: document.querySelector("#ssid").value,
-                psk: document.querySelector("#psk").value
-            });
             try {
                 connecting = true;
-                let res = await fetch("/setup", {
+                await fetch("/setup", {
                     method: "POST",
                     headers: {"Content-Type": "application/json"},
-                    body: json
+                    body: JSON.stringify(requestData)
                 });
-                connecting = false;
-                
-                // Stop the AP list interval
-                if (listInterval) {
-                    clearInterval(listInterval);
-                    listInterval = null;
-                }
-                
-                // Show modal with reconnect instructions
-                showModal(
-                    "WiFi credentials sent successfully! Please reconnect to your access point after 10-15 seconds if the WiFi isn't connected."
-                );
-            } catch (e) {
-                connecting = false;
-                // Stop the AP list interval
-                if (listInterval) {
-                    clearInterval(listInterval);
-                    listInterval = null;
-                }
-                // Show modal even if there's an error
-                showModal(
-                    "WiFi credentials sent successfully! Please reconnect to your access point after 10-15 seconds if the WiFi isn't connected."
-                );
-            }
+            } catch (_) { }
+
+            connecting = false;
+            if (listInterval) {clearInterval(listInterval); listInterval = null;}
+            showModal("Credentials sent! Reconnect to your access point in 10–15 seconds if WiFi doesn't connect automatically.");
         });
 
+        function escapeHtml(str) {
+            const d = document.createElement("div");
+            d.appendChild(document.createTextNode(str));
+            return d.innerHTML;
+        }
+
         function selectSSID(text) {
-            document.querySelector("#ssid").value = text;
+            document.getElementById("ssid").value = text;
+            document.getElementById("psk").focus();
+        }
+
+        function signalColor(power) {
+            if (power >= 60) return "lit-high";
+            if (power >= 35) return "lit-mid";
+            return "lit-low";
+        }
+
+        function signalBars(power) {
+            const lit = signalColor(power);
+            const active = power >= 75 ? 4 : power >= 50 ? 3 : power >= 25 ? 2 : 1;
+            return [1, 2, 3, 4].map(i =>
+                `<div class="bar b${i}${i <= active ? " " + lit : ""}"></div>`
+            ).join("");
+        }
+
+        function showApList(res) {
+            const listEl = document.getElementById("list");
+
+            let wifis = res.split("\n")
+                .map(line => {
+                    const split = line.split(": ");
+                    if (split.length !== 2) return null;
+                    const ssid = split[0];
+                    const power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100);
+                    return {ssid, power};
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.power - a.power);
+
+            if (!wifis.length) {
+                listEl.innerHTML = `<div class="empty-state">No networks found</div>`;
+                return;
+            }
+
+            listEl.innerHTML = wifis.map(({ssid, power}) => `
+            <div class="network-item" onclick="selectSSID(${JSON.stringify(escapeHtml(ssid))})">
+                <div class="wifi-icon-wrap">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="color:#64748b">
+                        <path fill-rule="evenodd" d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+                    </svg>
+                </div>
+                <span class="network-name">${escapeHtml(ssid)}</span>
+                <div class="signal-group">
+                    <span class="signal-pct">${power}%</span>
+                    <div class="signal-bars">${signalBars(power)}</div>
+                </div>
+                <svg class="chevron" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
+                </svg>
+            </div>
+        `).join("");
         }
 
         async function getApList() {
             if (connecting || connected) return;
             try {
-                let res = await fetch("/list");
-                let text = await res.text();
+                const res = await fetch("/list");
+                const text = await res.text();
                 showApList(text);
-            } catch (e) {
-                if (connecting || connected) return;
-            }
+            } catch (_) { }
         }
 
-        function showApList(res) {
-            const listEl = document.querySelector('#list');
-            listEl.innerHTML = "";
-            let wifis = res.split("\n");
-            
-            for (let wifi of wifis) {
-                let split = wifi.split(": ");
-                if (split.length != 2) continue;
-                let ssid = split[0];
-                let power = Math.min(Math.max(2 * (parseInt(split[1]) + 100), 0), 100);
-                
-                const networkItem = document.createElement('div');
-                networkItem.className = 'network-item';
-                networkItem.onclick = () => selectSSID(ssid);
-                
-                networkItem.innerHTML = `
-                    <div class="network-info">
-                        <svg class="wifi-icon" width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
-                        </svg>
-                        <span>${ssid}</span>
-                    </div>
-                    <div class="signal-strength">
-                        <span>${power}%</span>
-                        <div class="signal-bar">
-                            <div class="signal-level" style="width: ${power}%"></div>
-                        </div>
-                    </div>
-                `;
-                
-                listEl.appendChild(networkItem);
-            }
-        }
-
-        if (!connected) {
-            listInterval = setInterval(getApList, 15000);
-            getApList();
-        }
+        listInterval = setInterval(getApList, 15000);
+        getApList();
     </script>
 </body>
+
 </html>

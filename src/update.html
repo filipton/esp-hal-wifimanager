@@ -1,159 +1,433 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OTA Firmware Update</title>
     <style>
         :root {
-            --primary-color: #2563eb;
-            --error-color: #dc2626;
-            --success-color: #16a34a;
-            --background-color: #f8fafc;
-            --card-background: #ffffff;
-            --text-color: #1e293b;
-            --border-color: #e2e8f0;
-            --hover-color: #f1f5f9;
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --bg: #f8fafc;
+            --surface: #ffffff;
+            --text: #0f172a;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --hover: #f1f5f9;
+            --success: #16a34a;
+            --error: #dc2626;
+            --radius: 10px;
+            --radius-sm: 6px;
         }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
         }
+
         body {
-            background-color: var(--background-color);
-            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            padding: clamp(1rem, 5vw, 2rem);
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
+            padding: clamp(1rem, 5vw, 2rem);
         }
+
         .container {
             width: 100%;
-            max-width: 500px;
-            background-color: var(--card-background);
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            padding: clamp(1rem, 5vw, 2rem);
+            max-width: 520px;
+        }
+
+        .page-title {
+            font-size: 1.375rem;
+            font-weight: 600;
+            color: var(--text);
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .page-title svg {
+            color: var(--primary);
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 0.875rem 1.125rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .card-title {
+            font-size: 0.8125rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+        }
+
+        .card-body {
+            padding: 1.125rem;
             display: flex;
             flex-direction: column;
-            gap: 1.5rem;
+            gap: 0.875rem;
         }
-        h1 {
-            font-size: clamp(1.5rem, 5vw, 1.875rem);
-            font-weight: bold;
-            text-align: center;
-            color: var(--primary-color);
-        }
-        input[type="file"] {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
-            background-color: var(--hover-color);
+
+        /* File drop zone */
+        .drop-zone {
+            border: 1.5px dashed var(--border);
+            border-radius: var(--radius-sm);
+            padding: 2rem 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.625rem;
             cursor: pointer;
-            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            transition: border-color 0.15s, background 0.15s;
+            position: relative;
         }
-        input[type="file"]:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+
+        .drop-zone:hover,
+        .drop-zone.drag-over {
+            border-color: var(--primary);
+            background: #eff6ff;
         }
-        button {
-            background-color: var(--primary-color);
-            color: white;
-            padding: 0.75rem;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
+
+        .drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .drop-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--hover);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+        }
+
+        .drop-label {
+            font-size: 0.9rem;
+            color: var(--text);
             font-weight: 500;
+            text-align: center;
+        }
+
+        .drop-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* File selected state */
+        .file-selected {
+            background: var(--hover);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            display: none;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-selected.visible {
+            display: flex;
+        }
+
+        .file-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: var(--radius-sm);
+            background: #dbeafe;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: var(--primary);
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-name {
+            font-size: 0.875rem;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 1px;
+        }
+
+        .file-clear {
+            background: none;
+            border: none;
             cursor: pointer;
-            transition: background-color 0.2s ease;
-            width: 100%;
+            color: var(--text-muted);
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            transition: color 0.15s, background 0.15s;
+            flex-shrink: 0;
         }
-        button:hover:not(:disabled) {
-            background-color: #1d4ed8;
+
+        .file-clear:hover {
+            color: var(--error);
+            background: #fee2e2;
         }
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        .progress-container {
+
+        /* Progress */
+        .progress-wrap {
             display: none;
             flex-direction: column;
             gap: 0.5rem;
         }
-        .progress-container.visible {
+
+        .progress-wrap.visible {
             display: flex;
         }
-        .progress-bar-wrapper {
+
+        .progress-track {
             width: 100%;
-            height: 24px;
-            background-color: var(--hover-color);
-            border-radius: 12px;
+            height: 6px;
+            background: var(--hover);
+            border-radius: 3px;
             overflow: hidden;
-            border: 1px solid var(--border-color);
+            border: 1px solid var(--border);
         }
+
         .progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, var(--primary-color), #3b82f6);
+            background: var(--primary);
             width: 0%;
+            border-radius: 3px;
             transition: width 0.3s ease;
+        }
+
+        .progress-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .progress-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .progress-pct {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text);
+        }
+
+        /* Status banner */
+        .status-banner {
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            line-height: 1.5;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .status-banner.info {
+            background: var(--hover);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+
+        .status-banner.success {
+            background: #f0fdf4;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
+
+        .status-banner.error {
+            background: #fef2f2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-top: 4px;
+            flex-shrink: 0;
+        }
+
+        .status-banner.info .status-dot {
+            background: var(--text-muted);
+        }
+
+        .status-banner.success .status-dot {
+            background: var(--success);
+        }
+
+        .status-banner.error .status-dot {
+            background: var(--error);
+        }
+
+        /* Buttons */
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 0.7rem 1rem;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
+            transition: background 0.15s, transform 0.1s;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-dark);
+        }
+
+        .btn-primary:active:not(:disabled) {
+            transform: scale(0.99);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 0.7rem 1rem;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            cursor: pointer;
+            width: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
-            font-size: 0.75rem;
-            font-weight: 600;
+            gap: 8px;
+            transition: background 0.15s;
+            text-decoration: none;
         }
-        .progress-text {
-            font-size: 0.875rem;
-            color: var(--text-color);
-            text-align: center;
-        }
-        #status {
-            margin-top: 0.5rem;
-            padding: 1rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            line-height: 1.4;
-            word-wrap: break-word;
-        }
-        .success {
-            background-color: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .error {
-            background-color: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .info {
-            background-color: #e2e3e5;
-            color: #383d41;
-            border: 1px solid #d6d8db;
+
+        .btn-secondary:hover {
+            background: var(--hover);
         }
     </style>
 </head>
+
 <body>
     <div class="container">
-        <h1>OTA Firmware Update</h1>
-        <input type="file" id="firmwareFile" accept=".bin">
-        <button id="uploadBtn" onclick="uploadFirmware()">Upload and Update</button>
-        
-        <div id="progressContainer" class="progress-container">
-            <div class="progress-bar-wrapper">
-                <div id="progressBar" class="progress-bar">0%</div>
+        <h1 class="page-title">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd"
+                    d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z"
+                    clip-rule="evenodd" />
+            </svg>
+            Firmware Update
+        </h1>
+
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Firmware File</span>
             </div>
-            <div id="progressText" class="progress-text">Uploading...</div>
+            <div class="card-body">
+                <div class="drop-zone" id="dropZone">
+                    <input type="file" id="firmwareFile" accept=".bin">
+                    <div class="drop-icon">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <span class="drop-label">Choose file or drag here</span>
+                    <span class="drop-hint">.bin files only</span>
+                </div>
+
+                <div class="file-selected" id="fileSelected">
+                    <div class="file-icon">
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name" id="fileName">—</div>
+                        <div class="file-meta" id="fileMeta">—</div>
+                    </div>
+                    <button class="file-clear" id="fileClear" title="Remove file">
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd"
+                                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+                                clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="progress-wrap" id="progressWrap">
+                    <div class="progress-row">
+                        <span class="progress-label" id="progressText">Uploading…</span>
+                        <span class="progress-pct" id="progressPct">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                </div>
+
+                <div class="status-banner info" id="status">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Select a firmware file (.bin) to begin.</span>
+                </div>
+
+                <button class="btn-primary" id="uploadBtn" onclick="uploadFirmware()">Upload and Update</button>
+            </div>
         </div>
-        
-        <div id="status" class="info">Select a firmware file (.bin) to update.</div>
+
+        <div class="card">
+            <div class="card-body">
+                <a href="/" class="btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
+                            clip-rule="evenodd" />
+                    </svg>
+                    Back to WiFi Setup
+                </a>
+            </div>
+        </div>
     </div>
+
     <script>
         const CRC_32_TAB = [
             0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
@@ -193,46 +467,83 @@
         function calc_crc32(buf, initialCrc) {
             let crc = ~initialCrc;
             for (let i = 0; i < buf.length; i++) {
-                let elem = buf[i];
-                let crc_idx = (crc ^ elem) & 0xFF;
-                crc = CRC_32_TAB[crc_idx] ^ (crc >>> 8);
+                crc = CRC_32_TAB[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
             }
             return (~crc) >>> 0;
         }
 
-        function updateProgress(percent, text) {
-            const progressBar = document.getElementById('progressBar');
-            const progressText = document.getElementById('progressText');
-            const progressContainer = document.getElementById('progressContainer');
-            
-            progressContainer.classList.add('visible');
-            progressBar.style.width = percent + '%';
-            progressBar.textContent = Math.round(percent) + '%';
-            if (text) {
-                progressText.textContent = text;
-            }
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
         }
 
-        function hideProgress() {
-            document.getElementById('progressContainer').classList.remove('visible');
+        const fileInput = document.getElementById('firmwareFile');
+        const dropZone = document.getElementById('dropZone');
+        const fileSelected = document.getElementById('fileSelected');
+        const fileName = document.getElementById('fileName');
+        const fileMeta = document.getElementById('fileMeta');
+        const fileClear = document.getElementById('fileClear');
+        const progressWrap = document.getElementById('progressWrap');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        const progressPct = document.getElementById('progressPct');
+        const statusDiv = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const uploadBtn = document.getElementById('uploadBtn');
+
+        function setStatus(type, msg) {
+            statusDiv.className = 'status-banner ' + type;
+            statusDiv.querySelector('.status-dot').className = 'status-dot';
+            statusText.textContent = msg;
+        }
+
+        function showFile(file) {
+            fileName.textContent = file.name;
+            fileMeta.textContent = formatBytes(file.size);
+            fileSelected.classList.add('visible');
+            setStatus('info', 'Ready to upload. Press the button below to start.');
+        }
+
+        function clearFile() {
+            fileInput.value = '';
+            fileSelected.classList.remove('visible');
+            progressWrap.classList.remove('visible');
+            setStatus('info', 'Select a firmware file (.bin) to begin.');
+        }
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) showFile(fileInput.files[0]);
+        });
+
+        fileClear.addEventListener('click', clearFile);
+
+        dropZone.addEventListener('dragover', (e) => {e.preventDefault(); dropZone.classList.add('drag-over');});
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const f = e.dataTransfer.files[0];
+            if (f) {fileInput.files = e.dataTransfer.files; showFile(f);}
+        });
+
+        function updateProgress(percent, text) {
+            progressWrap.classList.add('visible');
+            progressBar.style.width = percent + '%';
+            progressPct.textContent = Math.round(percent) + '%';
+            if (text) progressText.textContent = text;
         }
 
         async function uploadFirmware() {
-            const fileInput = document.getElementById('firmwareFile');
-            const statusDiv = document.getElementById('status');
-            const uploadBtn = document.getElementById('uploadBtn');
             const file = fileInput.files[0];
-
             if (!file) {
-                statusDiv.className = 'error';
-                statusDiv.textContent = 'Please select a firmware file.';
+                setStatus('error', 'Please select a firmware file first.');
                 return;
             }
 
             uploadBtn.disabled = true;
-            statusDiv.className = 'info';
-            statusDiv.textContent = 'Reading file...';
-            hideProgress();
+            setStatus('info', 'Reading file…');
+            progressWrap.classList.remove('visible');
 
             let updateComplete = false;
             let finalMessage = '';
@@ -240,43 +551,31 @@
             try {
                 const arrayBuffer = await file.arrayBuffer();
                 const byteArray = new Uint8Array(arrayBuffer);
-                const fileSize = byteArray.length;
                 const fileCrc = calc_crc32(byteArray, 0x0);
 
-                statusDiv.textContent = `File read. Size: ${fileSize} bytes, CRC: 0x${fileCrc.toString(16)}. Uploading...`;
-                updateProgress(0, 'Starting upload...');
+                fileMeta.textContent = `${formatBytes(byteArray.length)} · CRC 0x${fileCrc.toString(16).toUpperCase()}`;
+                setStatus('info', 'Uploading firmware…');
+                updateProgress(0, 'Starting upload…');
 
-                const response = await fetch(`/update?size=${fileSize}&crc=${fileCrc}`, {
+                const response = await fetch(`/update?size=${byteArray.length}&crc=${fileCrc}`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/octet-stream'
-                    },
+                    headers: {'Content-Type': 'application/octet-stream'},
                     body: byteArray
                 });
 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
+                if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
-                // Read the response stream for progress updates
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
 
                 while (true) {
-                    const { done, value } = await reader.read();
+                    const {done, value} = await reader.read();
                     if (done) break;
-
-                    const text = decoder.decode(value, { stream: true });
-                    const lines = text.split('\n');
-
+                    const lines = decoder.decode(value, {stream: true}).split('\n');
                     for (const line of lines) {
                         if (line.startsWith('PROGRESS:')) {
-                            // Format: PROGRESS:received,total
-                            const parts = line.substring(9).split(',');
-                            const received = parseInt(parts[0]);
-                            const total = parseInt(parts[1]);
-                            const percent = (received / total) * 100;
-                            updateProgress(percent, `Received: ${received} / ${total} bytes`);
+                            const [recv, total] = line.substring(9).split(',').map(Number);
+                            updateProgress((recv / total) * 100, `${formatBytes(recv)} of ${formatBytes(total)}`);
                         } else if (line.startsWith('DONE:')) {
                             updateComplete = true;
                             finalMessage = line.substring(5);
@@ -286,29 +585,20 @@
                     }
                 }
 
-                // If we got DONE message, update was successful
                 if (updateComplete) {
-                    updateProgress(100, 'Upload complete!');
-                    statusDiv.className = 'success';
-                    statusDiv.textContent = `Update successful: ${finalMessage || 'Device is restarting...'}`;
+                    updateProgress(100, 'Upload complete');
+                    setStatus('success', finalMessage || 'Update successful — device is restarting…');
                 } else {
-                    // No DONE message received
-                    statusDiv.className = 'info';
-                    statusDiv.textContent = 'Upload completed but no confirmation received.';
+                    setStatus('info', 'Upload finished but no confirmation received.');
                 }
 
             } catch (error) {
-                // Only show error if update wasn't marked as complete
                 if (!updateComplete) {
-                    hideProgress();
-                    statusDiv.className = 'error';
-                    statusDiv.textContent = `An error occurred: ${error.message}`;
-                    console.error('Upload error:', error);
+                    progressWrap.classList.remove('visible');
+                    setStatus('error', `Upload failed: ${error.message}`);
                 } else {
-                    // Update was complete, connection just closed (expected due to device reset)
-                    updateProgress(100, 'Upload complete!');
-                    statusDiv.className = 'success';
-                    statusDiv.textContent = `Update successful: ${finalMessage || 'Device is restarting...'}`;
+                    updateProgress(100, 'Upload complete');
+                    setStatus('success', finalMessage || 'Update successful — device is restarting…');
                 }
             } finally {
                 uploadBtn.disabled = false;
@@ -316,4 +606,5 @@
         }
     </script>
 </body>
+
 </html>
