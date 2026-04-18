@@ -37,7 +37,9 @@ async fn main(spawner: Spawner) {
     log::set_max_level(log::LevelFilter::Info);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    esp_rtos::start(timg0.timer0);
+    let sw_int =
+        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_int.software_interrupt0);
 
     let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000, peripherals.FLASH).unwrap();
 
@@ -57,7 +59,7 @@ async fn main(spawner: Spawner) {
         &spawner,
         Some(&nvs),
         peripherals.WIFI,
-        peripherals.BT,
+        //peripherals.BT,
         None,
     )
     .await;

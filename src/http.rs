@@ -317,6 +317,8 @@ pub async fn run_http_server(
     wifi_panel_str: &'static str,
 ) {
     for id in 0..WEB_TASK_POOL_SIZE {
-        spawner.must_spawn(web_task(id, ap_stack, signals.clone(), wifi_panel_str));
+        spawner.spawn(
+            web_task(id, ap_stack, signals.clone(), wifi_panel_str).expect("Web task failed"),
+        );
     }
 }
