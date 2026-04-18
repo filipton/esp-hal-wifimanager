@@ -3,7 +3,9 @@ use alloc::rc::Rc;
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-use esp_radio::wifi::{WifiController, WifiDevice};
+#[cfg(feature = "ap")]
+use esp_radio::wifi::Interface;
+use esp_radio::wifi::WifiController;
 
 #[cfg(feature = "ap")]
 use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
@@ -14,7 +16,7 @@ pub async fn spawn_ap(
     spawner: &Spawner,
     wm_signals: Rc<WmInnerSignals>,
     settings: WmSettings,
-    ap_interface: WifiDevice<'static>,
+    ap_interface: Interface<'static>,
 ) -> Result<()> {
     let ap_ip = embassy_net::Ipv4Address::new(192, 168, 4, 1);
     let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
@@ -34,8 +36,8 @@ pub async fn spawn_ap(
         rng.random() as u64,
     );
 
-    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone()))?;
-    spawner.spawn(crate::ap::run_dhcp_server(ap_stack))?;
+    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone())?);
+    spawner.spawn(crate::ap::run_dhcp_server(ap_stack)?);
     crate::http::run_http_server(spawner, ap_stack, wm_signals.clone(), settings.wifi_panel).await;
 
     Ok(())
@@ -96,7 +98,8 @@ pub async fn wifi_wait_for_ip(stack: &Stack<'static>) -> [u8; 4] {
 }
 
 pub fn get_efuse_mac() -> u64 {
-    esp_hal::efuse::Efuse::mac_address()
+    esp_hal::efuse::base_mac_address()
+        .as_bytes()
         .iter()
         .fold(0u64, |acc, &x| (acc << 8) + x as u64)
 }

@@ -8,10 +8,7 @@ use embassy_sync::{
     pubsub::PubSubChannel,
     signal::Signal,
 };
-use esp_radio::{
-    wifi::{ClientConfig, ModeConfig, WifiError},
-    Controller, InitializationError,
-};
+use esp_radio::wifi::{sta::StationConfig, Config, WifiError};
 use serde::{Deserialize, Serialize};
 
 pub type Result<T> = core::result::Result<T, WmError>;
@@ -23,7 +20,6 @@ pub enum WmError {
 
     WifiControllerStartError,
     WifiError(WifiError),
-    WifiInitalizationError(InitializationError),
     SerdeError(serde_json::Error),
     TaskSpawnError,
     NvsError(esp_nvs::error::Error),
@@ -34,12 +30,6 @@ pub enum WmError {
 impl From<esp_nvs::error::Error> for WmError {
     fn from(value: esp_nvs::error::Error) -> Self {
         Self::NvsError(value)
-    }
-}
-
-impl From<InitializationError> for WmError {
-    fn from(value: InitializationError) -> Self {
-        Self::WifiInitalizationError(value)
     }
 }
 
@@ -130,12 +120,12 @@ pub(crate) struct AutoSetupSettings {
 }
 
 impl AutoSetupSettings {
-    pub fn to_configuration(&self) -> Result<ModeConfig> {
-        Ok(ModeConfig::Client(self.to_client_conf()?))
+    pub fn to_configuration(&self) -> Result<Config> {
+        Ok(Config::Station(self.to_station()?))
     }
 
-    pub fn to_client_conf(&self) -> Result<ClientConfig> {
-        Ok(ClientConfig::default()
+    pub fn to_station(&self) -> Result<StationConfig> {
+        Ok(StationConfig::default()
             .with_ssid(self.ssid.clone())
             .with_password(self.psk.clone()))
     }
@@ -163,7 +153,6 @@ impl Default for WmSettings {
 }
 
 pub struct WmReturn {
-    pub wifi_init: &'static Controller<'static>,
     pub sta_stack: Stack<'static>,
     pub data: Option<serde_json::Value>,
     pub ip_address: [u8; 4],

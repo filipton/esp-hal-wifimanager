@@ -1,7 +1,7 @@
 use alloc::rc::Rc;
 use embassy_net::{Runner, Stack};
 use embassy_time::Duration;
-use esp_radio::wifi::WifiDevice;
+use esp_radio::wifi::Interface;
 
 use crate::structs::WmInnerSignals;
 #[embassy_executor::task]
@@ -34,7 +34,7 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>) {
 
 #[embassy_executor::task]
 pub async fn ap_task(
-    mut runner: Runner<'static, WifiDevice<'static>>,
+    mut runner: Runner<'static, Interface<'static>>,
     signals: Rc<WmInnerSignals>,
 ) {
     embassy_futures::select::select(runner.run(), signals.end_signalled()).await;
