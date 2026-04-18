@@ -59,7 +59,7 @@ async fn main(spawner: Spawner) {
         &spawner,
         Some(&nvs),
         peripherals.WIFI,
-        //peripherals.BT,
+        peripherals.BT,
         None,
     )
     .await;

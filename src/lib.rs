@@ -41,15 +41,6 @@ mod utils;
 
 pub const WIFI_NVS_KEY: &str = "WIFI_SETUP";
 
-macro_rules! mk_static {
-    ($t:ty,$val:expr) => {{
-        static STATIC_CELL: static_cell::StaticCell<$t> = static_cell::StaticCell::new();
-        #[deny(unused_attributes)]
-        let x = STATIC_CELL.uninit().write($val);
-        x
-    }};
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn init_wm(
     settings: WmSettings,
@@ -125,7 +116,6 @@ pub async fn init_wm(
 
         #[cfg(feature = "ble")]
         spawner.spawn(bluetooth::bluetooth_task(
-            init,
             bt,
             generated_ssid,
             wm_signals.clone(),

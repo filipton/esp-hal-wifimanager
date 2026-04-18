@@ -468,8 +468,20 @@
 
         document.getElementById("panel").addEventListener("submit", async (e) => {
             e.preventDefault();
-            const ssid = document.getElementById("ssid").value;
+            const ssid = document.getElementById("ssid").value.trim();
             const psk = document.getElementById("psk").value;
+
+            if (!ssid) {
+                const input = document.getElementById("ssid");
+                input.focus();
+                input.style.borderColor = "var(--error)";
+                input.style.boxShadow = "0 0 0 3px rgba(220,38,38,0.15)";
+                input.addEventListener("input", () => {
+                    input.style.borderColor = "";
+                    input.style.boxShadow = "";
+                }, { once: true });
+                return;
+            }
             let requestData = {ssid, psk, data: {}};
 
             try {

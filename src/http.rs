@@ -222,7 +222,11 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> 
         esp_hal::peripherals::FLASH::steal()
     }))
     .ok()?;
-    ota.ota_begin(size, crc).ok()?;
+    let res = ota.ota_begin(size, crc);
+    if let Err(e) = res {
+        log::warn!("Ota begin error: {e:?}");
+        return None;
+    }
 
     let mut ota_buffer = [0; 4096];
     ota_buffer[..req.body.len()].copy_from_slice(req.body);
