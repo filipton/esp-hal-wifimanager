@@ -99,15 +99,8 @@
         }
 
         @keyframes pulse {
-
-            0%,
-            100% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0.3;
-            }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
         }
 
         #list {
@@ -181,33 +174,14 @@
             background: var(--border);
         }
 
-        .bar.b1 {
-            height: 5px;
-        }
+        .bar.b1 { height: 5px; }
+        .bar.b2 { height: 8px; }
+        .bar.b3 { height: 11px; }
+        .bar.b4 { height: 14px; }
 
-        .bar.b2 {
-            height: 8px;
-        }
-
-        .bar.b3 {
-            height: 11px;
-        }
-
-        .bar.b4 {
-            height: 14px;
-        }
-
-        .bar.lit-high {
-            background: var(--signal-high);
-        }
-
-        .bar.lit-mid {
-            background: var(--signal-mid);
-        }
-
-        .bar.lit-low {
-            background: var(--signal-low);
-        }
+        .bar.lit-high { background: var(--signal-high); }
+        .bar.lit-mid  { background: var(--signal-mid); }
+        .bar.lit-low  { background: var(--signal-low); }
 
         .chevron {
             color: var(--text-muted);
@@ -280,70 +254,6 @@
 
         .pw-toggle:hover {
             color: var(--text);
-        }
-
-        .toggle-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.625rem 0.875rem;
-            background: var(--hover);
-            border-radius: var(--radius-sm);
-            cursor: pointer;
-        }
-
-        .toggle-label {
-            font-size: 0.9rem;
-            color: var(--text);
-            user-select: none;
-        }
-
-        .toggle-switch {
-            position: relative;
-            width: 36px;
-            height: 20px;
-            flex-shrink: 0;
-        }
-
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-            position: absolute;
-        }
-
-        .toggle-track {
-            position: absolute;
-            inset: 0;
-            background: var(--border);
-            border-radius: 20px;
-            transition: background 0.2s;
-            cursor: pointer;
-        }
-
-        .toggle-track:before {
-            content: "";
-            position: absolute;
-            width: 14px;
-            height: 14px;
-            left: 3px;
-            top: 3px;
-            background: white;
-            border-radius: 50%;
-            transition: transform 0.2s;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
-        }
-
-        .toggle-switch input:checked+.toggle-track {
-            background: var(--primary);
-        }
-
-        .toggle-switch input:checked+.toggle-track:before {
-            transform: translateX(16px);
-        }
-
-        .hidden {
-            display: none;
         }
 
         .btn-primary {
@@ -572,19 +482,23 @@
             } catch (_) { }
 
             connecting = false;
-            if (listInterval) {clearInterval(listInterval); listInterval = null;}
+            if (listInterval) { clearInterval(listInterval); listInterval = null; }
             showModal("Credentials sent! Reconnect to your access point in 10–15 seconds if WiFi doesn't connect automatically.");
+        });
+
+        // Delegate clicks on the list — avoids all inline quoting issues
+        document.getElementById("list").addEventListener("click", (e) => {
+            const item = e.target.closest(".network-item");
+            if (item) {
+                document.getElementById("ssid").value = item.dataset.ssid;
+                document.getElementById("psk").focus();
+            }
         });
 
         function escapeHtml(str) {
             const d = document.createElement("div");
             d.appendChild(document.createTextNode(str));
             return d.innerHTML;
-        }
-
-        function selectSSID(text) {
-            document.getElementById("ssid").value = text;
-            document.getElementById("psk").focus();
         }
 
         function signalColor(power) {
@@ -621,22 +535,22 @@
             }
 
             listEl.innerHTML = wifis.map(({ssid, power}) => `
-            <div class="network-item" onclick="selectSSID(${JSON.stringify(escapeHtml(ssid))})">
-                <div class="wifi-icon-wrap">
-                    <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="color:#64748b">
-                        <path fill-rule="evenodd" d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+                <div class="network-item" data-ssid="${escapeHtml(ssid)}">
+                    <div class="wifi-icon-wrap">
+                        <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="color:#64748b">
+                            <path fill-rule="evenodd" d="M17.778 8.222c-4.296-4.296-11.26-4.296-15.556 0A1 1 0 01.808 6.808c5.076-5.077 13.308-5.077 18.384 0a1 1 0 01-1.414 1.414zM14.95 11.05a7 7 0 00-9.9 0 1 1 0 01-1.414-1.414 9 9 0 0112.728 0 1 1 0 01-1.414 1.414zM12.12 13.88a3 3 0 00-4.242 0 1 1 0 01-1.415-1.415 5 5 0 017.072 0 1 1 0 01-1.415 1.415zM9 16a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+                        </svg>
+                    </div>
+                    <span class="network-name">${escapeHtml(ssid)}</span>
+                    <div class="signal-group">
+                        <span class="signal-pct">${power}%</span>
+                        <div class="signal-bars">${signalBars(power)}</div>
+                    </div>
+                    <svg class="chevron" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
                     </svg>
                 </div>
-                <span class="network-name">${escapeHtml(ssid)}</span>
-                <div class="signal-group">
-                    <span class="signal-pct">${power}%</span>
-                    <div class="signal-bars">${signalBars(power)}</div>
-                </div>
-                <svg class="chevron" width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"/>
-                </svg>
-            </div>
-        `).join("");
+            `).join("");
         }
 
         async function getApList() {
