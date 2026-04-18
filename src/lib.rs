@@ -146,6 +146,12 @@ pub async fn init_wm(
         wifi_setup.data
     };
 
+    if let Err(e) = controller.disconnect_async().await {
+        log::debug!(
+            "Disconnect before connection task startup returned error (expected if not connected): {e:?}"
+        );
+    }
+
     let mut dhcp_config = DhcpConfig::default();
     dhcp_config.hostname = heapless::String::from_str(&settings.ssid).ok();
 
