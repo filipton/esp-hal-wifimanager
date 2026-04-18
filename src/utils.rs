@@ -68,6 +68,7 @@ pub async fn try_to_wifi_connect(
                 }
                 Err(e) => {
                     log::info!("Failed to connect to wifi: {e:?}");
+                    Timer::after_millis(50).await;
                 }
             },
             Err(_) => {

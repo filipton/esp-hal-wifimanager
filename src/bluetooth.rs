@@ -1,12 +1,15 @@
 use crate::structs::WmInnerSignals;
-use alloc::{rc::Rc, string::String};
+use alloc::{rc::Rc, string::String, vec::Vec};
 use core::str::FromStr;
 use embassy_futures::select::Either::{First, Second};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
-use esp_radio::{ble::controller::BleConnector, Controller as RadioController};
+use esp_radio::ble::controller::BleConnector;
 use rand_core::OsRng;
-use trouble_host::prelude::*;
+use trouble_host::{
+    att::{AttClient, AttReq},
+    prelude::*,
+};
 
 const CONNECTIONS_MAX: usize = 1;
 const L2CAP_CHANNELS_MAX: usize = 2; // Signal + att
@@ -26,20 +29,20 @@ struct WifiService {
 }
 
 #[embassy_executor::task]
-pub async fn bluetooth_task(
-    init: &'static RadioController<'static>,
-    bt: BT<'static>,
-    name: String,
-    signals: Rc<WmInnerSignals>,
-) {
-    let Ok(connector) = BleConnector::new(init, bt, esp_radio::ble::Config::default()) else {
+pub async fn bluetooth_task(bt: BT<'static>, name: String, signals: Rc<WmInnerSignals>) {
+    let Ok(connector) = BleConnector::new(bt, esp_radio::ble::Config::default()) else {
         log::error!("Cannot init ble connector");
         return;
     };
 
     let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
-    let address: Address = Address::random(esp_hal::efuse::Efuse::mac_address());
+    let address: Address = Address::random(
+        esp_hal::efuse::base_mac_address()
+            .as_bytes()
+            .try_into()
+            .expect("HOW? bluetooth mac addr"),
+    );
     log::info!("[ble] address = {address:x?}");
 
     let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
@@ -97,31 +100,76 @@ async fn gatt_events_task<P: PacketPool>(
     conn: &GattConnection<'_, '_, P>,
     signals: &Rc<WmInnerSignals>,
 ) -> Result<(), Error> {
+    let mut acc: Vec<u8> = Vec::new();
+    let mut long_write_buf: Vec<u8> = Vec::new();
+
     let reason = loop {
         let event = conn.next().await;
         match event {
             GattConnectionEvent::Disconnected { reason } => break reason,
             GattConnectionEvent::Gatt { event } => {
                 match &event {
-                    GattEvent::Read(event) => {
-                        if event.handle() == server.wifi_service.wifi_scan_res.handle {
-                            if let Ok(wifis) = signals.wifi_scan_res.try_lock() {
-                                let wifis = wifis.as_str();
-                                let wifis = if wifis.len() > 512 {
-                                    &wifis[..512]
-                                } else {
-                                    wifis
-                                };
-
-                                _ = server.set(
-                                    &server.wifi_service.wifi_scan_res,
-                                    &heapless::String::from_str(wifis).unwrap_or_default(),
-                                );
+                    GattEvent::Read(e) => {
+                        if e.handle() == server.wifi_service.wifi_scan_res.handle {
+                            let is_initial_read = matches!(
+                                e.payload().incoming(),
+                                AttClient::Request(AttReq::Read { .. })
+                            );
+                            if is_initial_read {
+                                if let Ok(wifis) = signals.wifi_scan_res.try_lock() {
+                                    let wifis = wifis.as_str();
+                                    let wifis = if wifis.len() > 512 {
+                                        &wifis[..512]
+                                    } else {
+                                        wifis
+                                    };
+                                    _ = server.set(
+                                        &server.wifi_service.wifi_scan_res,
+                                        &heapless::String::from_str(wifis).unwrap_or_default(),
+                                    );
+                                }
                             }
                         }
                     }
-                    GattEvent::Write(_) => {}
-                    GattEvent::Other(_) => {}
+                    GattEvent::Write(e) => {
+                        if e.handle() == server.wifi_service.setup_string.handle {
+                            if let Ok(chunk) = server.wifi_service.setup_string.get(server) {
+                                acc.extend_from_slice(chunk.as_bytes());
+                                if acc.last() == Some(&b'\0') {
+                                    acc.pop();
+                                    signals.wifi_conn_info_sig.signal(acc.clone());
+                                    acc.clear();
+                                }
+                            }
+                        }
+                    }
+                    GattEvent::Other(e) => match e.payload().incoming() {
+                        AttClient::Request(AttReq::PrepareWrite {
+                            handle,
+                            offset,
+                            value,
+                        }) => {
+                            if handle == server.wifi_service.setup_string.handle {
+                                let offset = offset as usize;
+                                let end = offset + value.len();
+                                if end > long_write_buf.len() {
+                                    long_write_buf.resize(end, 0);
+                                }
+                                long_write_buf[offset..end].copy_from_slice(value);
+                            }
+                        }
+                        AttClient::Request(AttReq::ExecuteWrite { flags }) if flags == 1 => {
+                            acc.extend_from_slice(&long_write_buf);
+                            long_write_buf.clear();
+                            if acc.last() == Some(&b'\0') {
+                                acc.pop();
+                                signals.wifi_conn_info_sig.signal(acc.clone());
+                                acc.clear();
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
                 };
 
                 match event.accept() {
@@ -132,6 +180,7 @@ async fn gatt_events_task<P: PacketPool>(
             _ => {}
         }
     };
+
     log::info!("[gatt] disconnected: {reason:?}");
     Ok(())
 }
@@ -166,26 +215,12 @@ async fn advertise<'values, 'server, C: Controller>(
 }
 
 async fn custom_task<C: Controller, P: PacketPool>(
-    server: &Server<'_>,
+    _server: &Server<'_>,
     _conn: &GattConnection<'_, '_, P>,
     _stack: &Stack<'_, C, P>,
-    signals: &Rc<WmInnerSignals>,
+    _signals: &Rc<WmInnerSignals>,
 ) {
-    let setup_string = server.wifi_service.setup_string.clone();
     loop {
-        let setup = setup_string.get(server);
-        if let Ok(setup) = setup {
-            if setup.ends_with('\0') {
-                let bytes = setup.as_bytes();
-
-                signals
-                    .wifi_conn_info_sig
-                    .signal(bytes[..bytes.len() - 1].to_vec());
-
-                _ = setup_string.set(server, &heapless::String::new());
-            }
-        }
-
         /*
         if let Ok(rssi) = conn.raw().rssi(stack).await {
             log::info!("[custom_task] RSSI: {:?}", rssi);
@@ -194,7 +229,6 @@ async fn custom_task<C: Controller, P: PacketPool>(
             break;
         };
         */
-
         Timer::after_millis(250).await;
     }
 }

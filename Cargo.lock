@@ -766,7 +766,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
- "embassy-sync 0.8.0",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "embedded-storage",

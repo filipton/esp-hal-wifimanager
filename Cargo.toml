@@ -19,7 +19,7 @@ log = "0.4.29"
 embassy-time = { version = "0.5.1", default-features = false }
 embassy-executor = { version = "0.10.0", default-features = false }
 heapless = { version = "0.9.2", default-features = false }
-embassy-sync = { version = "0.8.0", default-features = false }
+embassy-sync = { version = "0.7.2", default-features = false }
 esp-storage = { version = "0.9.0", default-features = false, features = ["critical-section"] }
 embedded-storage = "0.3.1"
 esp-hal-dhcp-server = { git = "https://github.com/filipton/esp-hal-dhcp-server.git", branch = "esp-hal-1.1.0", optional = true }
@@ -35,9 +35,9 @@ esp-nvs = { path = "/home/pilif/tmp/esp-nvs/esp-nvs" }
 esp-hal-ota = { git = "https://github.com/filipton/esp-hal-ota.git", branch = "esp-hal-1.1.0", optional = true, features = ["log"] }
 
 [features]
-default = ["esp32s3", "ap", "ota"]
+#default = []
 #default = ["esp32s3", "ap", "ble"]
-#default = ["esp32s3", "ap", "ble", "ota"]
+default = ["esp32s3", "ap", "ble", "ota"]
 
 esp32s2 = ["esp-hal/esp32s2","esp-radio/esp32s2","esp-rtos/esp32s2","esp-storage/esp32s2", "esp-nvs/esp32s2", "esp-hal-ota?/esp32s2"]
 esp32s3 = ["esp-hal/esp32s3","esp-radio/esp32s3","esp-rtos/esp32s3","esp-storage/esp32s3", "esp-nvs/esp32s3", "esp-hal-ota?/esp32s3"]
