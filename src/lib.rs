@@ -20,6 +20,7 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{Interface, WifiController};
+use portable_atomic::{AtomicBool, Ordering};
 use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 
 pub use nvs::Nvs;
@@ -40,6 +41,7 @@ mod structs;
 mod utils;
 
 pub const WIFI_NVS_KEY: &str = "WIFI_SETUP";
+static WIFI_CONTROLLER_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 #[allow(clippy::too_many_arguments)]
 pub async fn init_wm(
@@ -66,20 +68,16 @@ pub async fn init_wm(
     };
 
     let mut wifi_connected = false;
-    //let mut controller_started = false;
     if let Some(ref wifi_setup) = wifi_setup {
         log::debug!("Read wifi_setup from flash: {wifi_setup:?}");
         controller.set_config(&wifi_setup.to_configuration()?)?;
-        //controller_started = true;
 
         wifi_connected =
             utils::try_to_wifi_connect(&mut controller, settings.wifi_conn_timeout).await;
     }
 
-    let data = if wifi_connected {
-        wifi_setup
-            .expect("Shouldnt fail if connected i guesss.")
-            .data
+    let wifi_setup = if wifi_connected {
+        wifi_setup.expect("Internal error: wifi_setup should be Some when wifi_connected is true.")
     } else {
         log::info!("Starting wifimanager with ssid: {generated_ssid}");
 
@@ -121,12 +119,6 @@ pub async fn init_wm(
             wm_signals.clone(),
         )?);
 
-        /*
-        if !controller_started {
-            controller.start_async().await?;
-        }
-        */
-
         let wifi_setup = wifi_connection_worker(
             settings.clone(),
             wm_signals,
@@ -143,8 +135,10 @@ pub async fn init_wm(
             esp_hal::system::software_reset();
         }
 
-        wifi_setup.data
+        wifi_setup
     };
+    let wifi_configuration = wifi_setup.to_configuration()?;
+    let data = wifi_setup.data;
 
     if let Err(e) = controller.disconnect_async().await {
         log::debug!(
@@ -168,12 +162,26 @@ pub async fn init_wm(
     );
 
     let stop_signal = Rc::new(Signal::new());
-    spawner.spawn(connection(
+    if WIFI_CONTROLLER_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err(WmError::ControllerAlreadyActive);
+    }
+    let connection_token = connection(
         settings.wifi_reconnect_time,
         controller,
+        wifi_configuration,
         stop_signal.clone(),
         settings.wifi_conn_signal.clone(),
-    )?);
+    );
+    match connection_token {
+        Ok(token) => spawner.spawn(token),
+        Err(_) => {
+            WIFI_CONTROLLER_ACTIVE.store(false, Ordering::Release);
+            return Err(WmError::TaskSpawnError);
+        }
+    }
     spawner.spawn(sta_task(runner)?);
 
     Ok(WmReturn {
@@ -281,17 +289,79 @@ async fn wifi_connection_worker(
 #[embassy_executor::task]
 async fn connection(
     wifi_reconnect_time: u64,
-    mut controller: WifiController<'static>,
+    controller: WifiController<'static>,
+    configuration: esp_radio::wifi::Config,
     stop_signal: Rc<Signal<CriticalSectionRawMutex, bool>>,
     wifi_conn_signal: Option<Rc<Signal<CriticalSectionRawMutex, bool>>>,
 ) {
+    let mut controller_slot = Some(controller);
+    let mut stopped = false;
+
     loop {
+        if stopped {
+            loop {
+                if !stop_signal.wait().await {
+                    break;
+                }
+            }
+
+            if WIFI_CONTROLLER_ACTIVE
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                log::info!("Skipped wifi restart because another controller owner is active.");
+                Timer::after(Duration::from_millis(wifi_reconnect_time)).await;
+                continue;
+            }
+
+            // just steal wifi, fuck it lmao
+            match esp_radio::wifi::new(
+                unsafe { esp_hal::peripherals::WIFI::steal() },
+                Default::default(),
+            ) {
+                Ok((mut new_controller, _)) => {
+                    if let Err(e) =
+                        new_controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None)
+                    {
+                        log::info!(
+                            "Failed to disable power save while restarting wifi controller: {e:?}"
+                        );
+                        WIFI_CONTROLLER_ACTIVE.store(false, Ordering::Release);
+                        Timer::after(Duration::from_millis(wifi_reconnect_time)).await;
+                        continue;
+                    }
+
+                    if let Err(e) = new_controller.set_config(&configuration) {
+                        log::info!("Failed to set config while restarting wifi controller: {e:?}");
+                        WIFI_CONTROLLER_ACTIVE.store(false, Ordering::Release);
+                        Timer::after(Duration::from_millis(wifi_reconnect_time)).await;
+                        continue;
+                    }
+
+                    controller_slot = Some(new_controller);
+                    stopped = false;
+                    log::info!("WIFI controller restarted.");
+                }
+                Err(e) => {
+                    log::info!("Failed to recreate wifi controller: {e:?}");
+                    WIFI_CONTROLLER_ACTIVE.store(false, Ordering::Release);
+                    Timer::after(Duration::from_millis(wifi_reconnect_time)).await;
+                    continue;
+                }
+            }
+        }
+
+        let controller = controller_slot
+            .as_mut()
+            .expect("Internal error: controller slot missing while running connection loop");
+
         match controller.connect_async().await {
             Ok(_) => {
                 if let Some(ref sig) = wifi_conn_signal {
                     sig.signal(true);
                 }
                 log::info!("Wifi connected!");
+                let mut stop_requested = false;
 
                 'connected: loop {
                     let res = embassy_futures::select::select(
@@ -315,23 +385,22 @@ async fn connection(
                         Either::Second(val) => {
                             if val {
                                 _ = controller.disconnect_async().await;
-                                _ = controller
-                                    .set_power_saving(esp_radio::wifi::PowerSaveMode::Maximum);
-                                log::info!("WIFI radio stopped!");
-
-                                loop {
-                                    if !stop_signal.wait().await {
-                                        break;
-                                    }
+                                if let Some(ref sig) = wifi_conn_signal {
+                                    sig.signal(false);
                                 }
-
-                                _ = controller
-                                    .set_power_saving(esp_radio::wifi::PowerSaveMode::None);
-                                log::info!("WIFI radio restarting...");
+                                stop_requested = true;
                                 break 'connected;
                             }
                         }
                     }
+                }
+
+                if stop_requested {
+                    WIFI_CONTROLLER_ACTIVE.store(false, Ordering::Release);
+                    controller_slot.take();
+                    stopped = true;
+                    log::info!("WIFI controller stopped.");
+                    continue;
                 }
             }
 
