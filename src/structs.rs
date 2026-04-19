@@ -23,6 +23,7 @@ pub enum WmError {
     SerdeError(serde_json::Error),
     TaskSpawnError,
     NvsError(esp_nvs::error::Error),
+    ControllerAlreadyActive,
 
     Other,
 }
