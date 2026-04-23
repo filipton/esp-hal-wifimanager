@@ -70,7 +70,6 @@ pub struct WmSettings {
     pub ssid: String,
 
     /// Panel hosted on AP (html)
-    /// TODO: Make this as dictionary so, you will be able to upload more files
     pub wifi_panel: &'static str,
 
     /// Max time WiFi will try to connect (in ms)
@@ -139,7 +138,12 @@ impl Default for WmSettings {
     fn default() -> Self {
         Self {
             ssid: alloc::format!("ESP-{:X}", get_efuse_mac()),
-            wifi_panel: include_str!("./panel.html"),
+
+            #[cfg(not(feature = "custom_panel"))]
+            wifi_panel: include_minifier::include_minified!("src/panel.html"),
+
+            #[cfg(feature = "custom_panel")]
+            wifi_panel: "<h1>EMPTY PANEL</h1>",
 
             wifi_reconnect_time: 1000,
             wifi_conn_timeout: 15000,

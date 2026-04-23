@@ -23,6 +23,7 @@ use esp_radio::wifi::{Interface, WifiController};
 use portable_atomic::{AtomicBool, Ordering};
 use structs::{AutoSetupSettings, Result, WmInnerSignals, WmReturn};
 
+pub use include_minifier::include_minified;
 pub use nvs::Nvs;
 pub use structs::{WmError, WmSettings};
 pub use utils::get_efuse_mac;
