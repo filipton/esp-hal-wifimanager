@@ -1,6 +1,6 @@
 [package]
 name = "esp-hal-wifimanager"
-version = "0.2.10"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Wifi Manager for esp-hal (bt+wifi ap)"
@@ -33,6 +33,7 @@ rand_core = { version = "0.6.4", features = ["getrandom"] }
 getrandom = { version = "=0.2.15", features = ["custom"] }
 esp-nvs = { git = "https://github.com/filipton/esp-nvs.git" }
 esp-hal-ota = { git = "https://github.com/filipton/esp-hal-ota.git", branch = "esp-hal-1.1.0", optional = true, features = ["log"] }
+include-minifier = "0.1.0"
 
 [features]
 #default = []
@@ -52,6 +53,7 @@ ap = ["dep:esp-hal-dhcp-server"]
 ble = ["dep:trouble-host", "esp-radio/ble", "esp-radio/coex"]
 ota = ["dep:esp-hal-ota"]
 env = []
+custom_panel = []
 
 [profile.dev]
 opt-level = 2

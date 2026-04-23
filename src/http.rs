@@ -55,7 +55,7 @@ fn create_http_response(status: &str, content_type: &str, body: &str) -> Vec<u8>
 }
 
 #[cfg(feature = "ota")]
-const UPDATE_PANEL_HTML: &str = include_str!("update.html");
+const UPDATE_PANEL_HTML: &str = include_minifier::include_minified!("src/update.html");
 #[cfg(not(feature = "ota"))]
 const UPDATE_PANEL_HTML: &str = "<html><body><p>OTA updates disabled</p></body></html>";
 
