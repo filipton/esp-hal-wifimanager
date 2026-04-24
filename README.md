@@ -78,5 +78,4 @@ unsafe {
 ```
 
 ## TODO:
-- [ ] Big cleanup
-- [ ] Configurable AP panel files (also allow multiple files)
+- [ ] Fix example
