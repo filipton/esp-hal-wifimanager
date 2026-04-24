@@ -133,13 +133,11 @@ async fn gatt_events_task<P: PacketPool>(
                     }
                     GattEvent::Write(e) => {
                         if e.handle() == server.wifi_service.setup_string.handle {
-                            if let Ok(chunk) = server.wifi_service.setup_string.get(server) {
-                                acc.extend_from_slice(chunk.as_bytes());
-                                if acc.last() == Some(&b'\0') {
-                                    acc.pop();
-                                    signals.wifi_conn_info_sig.signal(acc.clone());
-                                    acc.clear();
-                                }
+                            acc.extend_from_slice(e.data());
+                            if acc.last() == Some(&b'\0') {
+                                acc.pop();
+                                signals.wifi_conn_info_sig.signal(acc.clone());
+                                acc.clear();
                             }
                         }
                     }
