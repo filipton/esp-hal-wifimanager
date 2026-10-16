@@ -16,7 +16,7 @@ pub async fn spawn_ap(
     rng: &esp_hal::rng::Rng,
     spawner: &Spawner,
     wm_signals: &'static WmInnerSignals,
-    wifi_panel: &'static str,
+    wifi_panel: crate::Panel,
     ap_interface: Interface,
 ) -> Result<()> {
     let ap_ip = crate::ap::AP_IP;

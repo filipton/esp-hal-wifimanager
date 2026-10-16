@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.0
+
+Breaking, see [MIGRATING.md](MIGRATING.md).
+
+### Changed
+- `WmSettings::wifi_panel` is a `Panel` (`Builtin`, `Html`, `Gzip`) instead of `&'static str`.
+- Built-in panel and update page are minified and gzipped at compile time and served with
+  `Content-Encoding: gzip` (~15 KB less flash).
+- `include-minifier` 0.2 (much faster to compile, lighter minification).
+
+### Added
+- `Panel::Gzip` and `include_panel!("path")` to embed your own panel gzipped.
+
 ## 0.5.0
 
 Breaking, see [MIGRATING.md](MIGRATING.md).

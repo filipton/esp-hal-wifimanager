@@ -1,6 +1,6 @@
 [package]
 name = "esp-hal-wifimanager"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 description = "Wifi Manager for esp-hal (bt+wifi ap)"
@@ -38,7 +38,7 @@ portable-atomic = { version = "1.15.0", default-features = false }
 trouble-host = { version = "0.7.0", optional = true }
 esp-nvs = "0.6.2"
 esp-hal-ota = { version = "0.7.0", optional = true, features = ["log"] }
-include-minifier = "0.1.0"
+include-minifier = "0.2.0"
 
 [features]
 # pick exactly one chip feature yourself

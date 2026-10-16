@@ -99,11 +99,33 @@ async fn write_response(
     content_type: &str,
     body: &[u8],
 ) -> bool {
+    write_response_enc(socket, status, content_type, "", body).await
+}
+
+async fn write_html_gz(socket: &mut TcpSocket<'_>, body: &[u8]) -> bool {
+    write_response_enc(
+        socket,
+        "200 OK",
+        "text/html",
+        "Content-Encoding: gzip\r\n",
+        body,
+    )
+    .await
+}
+
+/// `extra_headers` are complete header lines (each ending in `\r\n`)
+async fn write_response_enc(
+    socket: &mut TcpSocket<'_>,
+    status: &str,
+    content_type: &str,
+    extra_headers: &str,
+    body: &[u8],
+) -> bool {
     let mut header: heapless::String<HTTP_HEADER_BUFFER_SIZE> = heapless::String::new();
     _ = core::fmt::write(
         &mut header,
         format_args!(
-            "HTTP/1.1 {status}\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Length: {}\r\n{extra_headers}Connection: close\r\n\r\n",
             body.len()
         ),
     );
@@ -124,20 +146,35 @@ async fn write_all(socket: &mut TcpSocket<'_>, data: &[u8]) -> bool {
 }
 
 #[cfg(feature = "ota")]
-const UPDATE_PANEL_HTML: &str = include_minifier::include_minified!("src/update.html");
-#[cfg(not(feature = "ota"))]
-const UPDATE_PANEL_HTML: &str = "<html><body><p>OTA updates disabled</p></body></html>";
+const UPDATE_PANEL_GZ: &[u8] = include_minifier::include_minified_gzip!("src/update.html");
+#[cfg(not(feature = "custom_panel"))]
+const PANEL_GZ: &[u8] = include_minifier::include_minified_gzip!("src/panel.html");
 
 async fn handle_request(
     request: HttpRequest<'_>,
     signals: &WmInnerSignals,
-    wifi_panel_str: &'static str,
+    wifi_panel: crate::Panel,
     socket: &mut TcpSocket<'_>,
 ) {
     if request.is("GET", "/") {
-        _ = write_response(socket, "200 OK", "text/html", wifi_panel_str.as_bytes()).await;
+        _ = match wifi_panel {
+            #[cfg(not(feature = "custom_panel"))]
+            crate::Panel::Builtin => write_html_gz(socket, PANEL_GZ).await,
+            crate::Panel::Html(html) => {
+                write_response(socket, "200 OK", "text/html", html.as_bytes()).await
+            }
+            crate::Panel::Gzip(gz) => write_html_gz(socket, gz).await,
+        };
     } else if request.is("GET", "/update") {
-        _ = write_response(socket, "200 OK", "text/html", UPDATE_PANEL_HTML.as_bytes()).await;
+        #[cfg(feature = "ota")]
+        {
+            _ = write_html_gz(socket, UPDATE_PANEL_GZ).await;
+        }
+        #[cfg(not(feature = "ota"))]
+        {
+            let html = b"<html><body><p>OTA updates disabled</p></body></html>";
+            _ = write_response(socket, "200 OK", "text/html", html).await;
+        }
     } else if request.is("GET", "/list") {
         let scan_res = signals.wifi_scan_res.try_lock();
         let resp = scan_res.as_ref().map(|s| s.as_str()).unwrap_or_default();
@@ -162,7 +199,7 @@ async fn handle_request(
 async fn web_task(
     stack: Stack<'static>,
     signals: &'static WmInnerSignals,
-    wifi_panel_str: &'static str,
+    wifi_panel: crate::Panel,
 ) {
     let fut = async {
         let mut rx_buffer = [0; 1024];
@@ -181,7 +218,7 @@ async fn web_task(
 
             match read_request(&mut socket, &mut http_buffer).await {
                 Some(n) => match parse_http_request(&http_buffer[..n]) {
-                    Some(req) => handle_request(req, signals, wifi_panel_str, &mut socket).await,
+                    Some(req) => handle_request(req, signals, wifi_panel, &mut socket).await,
                     None => {
                         _ = write_response(&mut socket, "400 Bad Request", "text/plain", b"").await
                     }
@@ -319,10 +356,10 @@ pub async fn run_http_server(
     spawner: &Spawner,
     ap_stack: Stack<'static>,
     signals: &'static WmInnerSignals,
-    wifi_panel_str: &'static str,
+    wifi_panel: crate::Panel,
 ) -> crate::Result<()> {
     for _ in 0..WEB_TASK_POOL_SIZE {
-        spawner.spawn(web_task(ap_stack, signals, wifi_panel_str)?);
+        spawner.spawn(web_task(ap_stack, signals, wifi_panel)?);
     }
 
     Ok(())

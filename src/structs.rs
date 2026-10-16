@@ -84,13 +84,35 @@ impl From<SpawnError> for WmError {
     }
 }
 
+/// Setup panel served on the AP at `/`
+#[derive(Clone, Copy, Debug)]
+pub enum Panel {
+    /// Built-in panel (gzipped); not available with the `custom_panel` feature
+    #[cfg(not(feature = "custom_panel"))]
+    Builtin,
+    /// Plain html, e.g. `Panel::Html(include_minified!("src/panel.html"))`
+    Html(&'static str),
+    /// Gzipped html, served with `Content-Encoding: gzip` (see README for a build.rs snippet)
+    Gzip(&'static [u8]),
+}
+
+impl Default for Panel {
+    fn default() -> Self {
+        #[cfg(not(feature = "custom_panel"))]
+        return Panel::Builtin;
+
+        #[cfg(feature = "custom_panel")]
+        Panel::Html("<h1>EMPTY PANEL</h1>")
+    }
+}
+
 #[derive(Clone)]
 pub struct WmSettings {
     /// AP SSID, BLE name and DHCP hostname
     pub ssid: Ssid,
 
-    /// Panel hosted on the AP (html)
-    pub wifi_panel: &'static str,
+    /// Panel hosted on the AP
+    pub wifi_panel: Panel,
 
     /// Max time a connection attempt may take
     pub wifi_conn_timeout: Duration,
@@ -142,11 +164,7 @@ impl Default for WmSettings {
         Self {
             ssid,
 
-            #[cfg(not(feature = "custom_panel"))]
-            wifi_panel: include_minifier::include_minified!("src/panel.html"),
-
-            #[cfg(feature = "custom_panel")]
-            wifi_panel: "<h1>EMPTY PANEL</h1>",
+            wifi_panel: Panel::default(),
 
             wifi_reconnect_time: Duration::from_millis(1000),
             wifi_conn_timeout: Duration::from_millis(15000),

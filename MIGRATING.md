@@ -1,3 +1,21 @@
+# Migrating from 0.5 to 0.6
+
+`WmSettings::wifi_panel` is now a `Panel` enum instead of `&'static str`, so panels can be
+served gzipped (the built-in panel and update page now are, ~15 KB less flash).
+
+```rust
+// 0.5
+wifi_panel: include_minified!("src/panel.html"),
+
+// 0.6: plain html, as before
+wifi_panel: Panel::Html(include_minified!("src/panel.html")),
+
+// 0.6: or minified + gzipped at compile time (recommended, ~3x smaller)
+wifi_panel: include_panel!("src/panel.html"),
+```
+
+The default is `Panel::Builtin` (`Panel::Html("<h1>EMPTY PANEL</h1>")` with `custom_panel`).
+
 # Migrating from 0.4 to 0.5
 
 0.5 removes `Rc`, `String` and `serde_json::Value` from the public API, makes NVS keys typed

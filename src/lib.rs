@@ -25,8 +25,24 @@ use structs::{Setup, SetupData, WmInnerSignals};
 
 pub use esp_nvs::Key;
 pub use include_minifier::include_minified;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use include_minifier::include_minified_gzip;
+}
+
+/// Embeds an html panel minified and gzipped at compile time (path relative to your
+/// `Cargo.toml`): `wifi_panel: include_panel!("src/panel.html")`
+#[macro_export]
+macro_rules! include_panel {
+    ($path:literal) => {
+        $crate::Panel::Gzip($crate::__private::include_minified_gzip!($path))
+    };
+}
 pub use nvs::Nvs;
-pub use structs::{ConnSignal, ProvisioningSignal, Result, Ssid, WifiManager, WmError, WmSettings};
+pub use structs::{
+    ConnSignal, Panel, ProvisioningSignal, Result, Ssid, WifiManager, WmError, WmSettings,
+};
 pub use utils::get_efuse_mac;
 
 #[cfg(feature = "ap")]

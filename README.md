@@ -10,7 +10,7 @@ The setup is saved to NVS, and the connection is kept up (reconnects) in the bac
 - `ble` (default): BLE setup service (not on ESP32-S2)
 - `ota` (default): firmware upload page (`/update`) on the access point
 - `env`: set up wifi from the `WM_CONN` env var at build time (quick testing)
-- `custom_panel`: don't embed the default panel (when you pass your own `wifi_panel`)
+- `custom_panel`: don't embed the built-in panel (when you pass your own `wifi_panel`)
 - chip: exactly one of `esp32`, `esp32s2`, `esp32s3`, `esp32c2`, `esp32c3`, `esp32c6`
 
 At least one of `ap`, `ble` or `env` is required.
@@ -18,6 +18,18 @@ At least one of `ap`, `ble` or `env` is required.
 ### env feature
 ```bash
 cargo run --config "env.WM_CONN='{\"ssid\": \"ssid\", \"psk\": \"pass\", \"data\": {}}'"
+```
+
+## Custom panel
+`WmSettings::wifi_panel` is a `Panel`: `Builtin` (default), `Html(&'static str)` or
+`Gzip(&'static [u8])` (served with `Content-Encoding: gzip`). Enable `custom_panel` so the
+built-in one isn't embedded, and embed yours minified and gzipped at compile time:
+
+```rust
+let settings = WmSettings {
+    wifi_panel: esp_hal_wifimanager::include_panel!("src/panel.html"), // relative to your Cargo.toml
+    ..Default::default()
+};
 ```
 
 ## Setup json
@@ -31,7 +43,7 @@ AP (`POST /setup`), BLE and `env` all take
 esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
 esp-radio = { version = "1.0.0-beta.1", features = ["esp32s3", "coex", "esp-alloc"] }
 esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy", "esp-radio"] }
-esp-hal-wifimanager = { version = "0.5.0", features = ["esp32s3"] }
+esp-hal-wifimanager = { version = "0.6.0", features = ["esp32s3"] }
 ```
 
 Same as [`examples/src/main.rs`](examples/src/main.rs):
