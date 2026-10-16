@@ -1,81 +1,99 @@
 # esp-hal-wifimanager
 Easy to use Wifimanager for esp-hal (no-std).
 
-If it can't connect to wifi it spawns BLE server (You can use chrome on android or windows to configure it)
-and open wifi accesspoint with DHCP server.
+If it can't connect to the saved wifi, it starts provisioning: a BLE server (configure it with
+Chrome on Android or Windows) and/or a wifi access point with a captive portal and DHCP server.
+The setup is saved to NVS, and the connection is kept up (reconnects) in the background.
 
-## Features (crate)
-- `ap` feature that will spawn ap to connect to
-- `ble` feature that will spawn ble server to connect to
-- `env` feature that will automatically setup wifi from env vars (for quick and easy testing)
-- `esp32c3`/`esp32s3`/`esp32` feature to select platform
-    - other platforms are supported, but i haven't tested them!
+## Features
+- `ap` (default): access point with the setup panel (`/`), scan list (`/list`) and DHCP server
+- `ble` (default): BLE setup service (not on ESP32-S2)
+- `ota` (default): firmware upload page (`/update`) on the access point
+- `env`: set up wifi from the `WM_CONN` env var at build time (quick testing)
+- `custom_panel`: don't embed the default panel (when you pass your own `wifi_panel`)
+- chip: exactly one of `esp32`, `esp32s2`, `esp32s3`, `esp32c2`, `esp32c3`, `esp32c6`
 
-If neither `ap`, `ble` nor `env` feature is selected, crate will fail to compile.
-Obviously you need to select your platform (`esp32s3` / `esp32c3`)
+At least one of `ap`, `ble` or `env` is required.
 
-### How to use env feature
-Env feature will automatically setup wifi after startup, to use it:
-- Set [env] WM_CONN inside `.cargo/config.toml` file
-- Start `cargo run` with WM_CONN env var like this:
+### env feature
 ```bash
 cargo run --config "env.WM_CONN='{\"ssid\": \"ssid\", \"psk\": \"pass\", \"data\": {}}'"
 ```
 
-## Simple example
-Add this to your Cargo.toml (note also add `embassy`, its only for async):
+## Setup json
+AP (`POST /setup`), BLE and `env` all take
+`{"ssid": "...", "psk": "...", "data": <any json>}`. An empty `psk` means an open network.
+`data` is handed to your app as raw json by `WifiManager::data()`.
 
+## Example
 ```toml
 [dependencies]
-esp-hal = { version = "1.2.2", features = [ "esp32s3", "unstable" ] }
-esp-radio = { version = "1.0.0-beta.1", features = [ "esp32s3", "coex", "esp-alloc" ] }
+esp-hal = { version = "1.2.2", features = ["esp32s3", "unstable"] }
+esp-radio = { version = "1.0.0-beta.1", features = ["esp32s3", "coex", "esp-alloc"] }
 esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy", "esp-radio"] }
-esp-hal-wifimanager = { version = "0.4.0", default-features = false, features = ["esp32s3", "ap", "ble"] }
+esp-hal-wifimanager = { version = "0.5.0", features = ["esp32s3"] }
 ```
 
-Simple example (to see full example check `./examples` dir):
+Same as [`examples/src/main.rs`](examples/src/main.rs):
 ```rust
-// ...
-let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
-esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+#![no_std]
+#![no_main]
 
-let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000, peripherals.FLASH).unwrap();
-let wm_settings = esp_hal_wifimanager::WmSettings::default();
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+use esp_backtrace as _;
+use esp_hal::timer::timg::TimerGroup;
 
-let wifi_res = esp_hal_wifimanager::init_wm(
-    wm_settings,
-    &spawner,
-    Some(&nvs),
-    peripherals.WIFI,
-    peripherals.BT, // only if ble feature is enabled
-    None, // signal for ap/ble start
-)
-.await;
-```
+esp_bootloader_esp_idf::esp_app_desc!();
 
-## Heap FIX on esp32 (generic)
-From [wifi-coex](https://github.com/esp-rs/esp-hal/blob/main/examples/src/bin/wifi_coex.rs) example in esp-hal repo.
-```rust
-static mut HEAP: core::mem::MaybeUninit<[u8; 30 * 1024]> = core::mem::MaybeUninit::uninit();
+#[esp_rtos::main]
+async fn main(spawner: Spawner) {
+    esp_alloc::heap_allocator!(size: 150 * 1024);
+    let peripherals = esp_hal::init(esp_hal::Config::default());
 
-#[link_section = ".dram2_uninit"]
-static mut HEAP2: core::mem::MaybeUninit<[u8; 64 * 1024]> = core::mem::MaybeUninit::uninit();
+    esp_println::logger::init_logger_from_env();
+    log::set_max_level(log::LevelFilter::Info);
 
-unsafe {
-    esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-        HEAP.as_mut_ptr() as *mut u8,
-        core::mem::size_of_val(&*core::ptr::addr_of!(HEAP)),
-        esp_alloc::MemoryCapability::Internal.into(),
-    ));
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
-    // COEX needs more RAM - add some more
-    esp_alloc::HEAP.add_region(esp_alloc::HeapRegion::new(
-        HEAP2.as_mut_ptr() as *mut u8,
-        core::mem::size_of_val(&*core::ptr::addr_of!(HEAP2)),
-        esp_alloc::MemoryCapability::Internal.into(),
-    ));
+    let nvs = esp_hal_wifimanager::Nvs::new(peripherals.FLASH).unwrap();
+
+    let mut wm_settings = esp_hal_wifimanager::WmSettings {
+        wifi_conn_timeout: Duration::from_secs(30),
+        esp_reset_timeout: Some(Duration::from_secs(300)),
+        ..Default::default()
+    };
+
+    wm_settings.ssid.clear();
+    _ = core::fmt::write(
+        &mut wm_settings.ssid,
+        format_args!("TEST-{:X}", esp_hal_wifimanager::get_efuse_mac()),
+    );
+
+    let wifi_res = esp_hal_wifimanager::init_wm(
+        wm_settings,
+        &spawner,
+        Some(nvs),
+        peripherals.WIFI,
+        peripherals.BT,
+    )
+    .await;
+
+    log::info!("wifi_res: {wifi_res:?}");
+
+    loop {
+        log::info!("bump {}", esp_hal::time::Instant::now());
+        Timer::after_millis(15000).await;
+    }
 }
 ```
 
-## TODO:
-- [ ] Fix example
+Upgrading from 0.4? See [MIGRATING.md](MIGRATING.md).
+
+## Heap on ESP32 (wifi + BLE coexistence)
+Coex needs more RAM than the main heap region has; add the reclaimed bootloader RAM:
+```rust
+esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
+esp_alloc::heap_allocator!(size: 36 * 1024);
+```

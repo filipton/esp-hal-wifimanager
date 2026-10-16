@@ -1,5 +1,4 @@
 use crate::structs::WmInnerSignals;
-use alloc::rc::Rc;
 use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use edge_dhcp::server::{Server, ServerOptions};
 use edge_nal::UdpBind;
@@ -14,7 +13,7 @@ const DHCP_LEASES: usize = 16;
 
 /// DHCP for AP clients; the AP itself is their gateway, DNS and captive portal.
 #[embassy_executor::task]
-pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: Rc<WmInnerSignals>) {
+pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: &'static WmInnerSignals) {
     let buffers = UdpBuffers::<1>::new();
     let udp = Udp::new(ap_stack, &buffers);
     let mut socket = match udp
@@ -53,6 +52,6 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: Rc<WmInnerSignal
 }
 
 #[embassy_executor::task]
-pub async fn ap_task(mut runner: Runner<'static, Interface>, signals: Rc<WmInnerSignals>) {
+pub async fn ap_task(mut runner: Runner<'static, Interface>, signals: &'static WmInnerSignals) {
     select(runner.run(), signals.end_signalled()).await;
 }

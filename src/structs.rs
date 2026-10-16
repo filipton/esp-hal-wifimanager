@@ -1,5 +1,5 @@
 use crate::get_efuse_mac;
-use alloc::{rc::Rc, string::String};
+use core::net::Ipv4Addr;
 use embassy_executor::SpawnError;
 use embassy_net::Stack;
 use embassy_sync::{
@@ -8,98 +8,116 @@ use embassy_sync::{
     pubsub::PubSubChannel,
     signal::Signal,
 };
+use embassy_time::Duration;
 use esp_radio::wifi::{sta::StationConfig, AuthenticationMethodConfig, Config, WifiError};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::value::RawValue;
 
 pub type Result<T> = core::result::Result<T, WmError>;
 
-/// Max size of a setup json from the AP panel or BLE
+/// Max size of a setup json from the AP panel, BLE or NVS
 pub(crate) const MAX_SETUP_LEN: usize = 1024;
 pub(crate) type SetupData = heapless::Vec<u8, MAX_SETUP_LEN>;
 
+/// Scan results shown by the AP panel (`/list`) and BLE: `<ssid>: <rssi>\n` per network
+pub(crate) const SCAN_LIST_LEN: usize = 1024;
+
+/// AP SSID / BLE name / DHCP hostname (an SSID is at most 32 bytes).
+pub type Ssid = heapless::String<32>;
+
+/// `true` when the station connected, `false` when it disconnected.
+pub type ConnSignal = Signal<CriticalSectionRawMutex, bool>;
+
+/// Signalled once when provisioning (AP and/or BLE) starts.
+pub type ProvisioningSignal = Signal<CriticalSectionRawMutex, ()>;
+
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WmError {
-    /// TODO: add connection timeout (time after which init_wm returns WmTimeout error
-    WmTimeout,
-
-    WifiControllerStartError,
-    WifiError(WifiError),
-    SerdeError(serde_json::Error),
-    TaskSpawnError,
-    NvsError(esp_nvs::error::Error),
-    ControllerAlreadyActive,
-
-    Other,
+    /// The wifi driver rejected a call or configuration
+    Wifi(WifiError),
+    /// NVS read/write failed
+    Nvs(esp_nvs::error::Error),
+    /// There's no `nvs` partition in the partition table
+    NvsPartitionNotFound,
+    /// [`crate::Nvs`] was already created (there can only be one)
+    NvsAlreadyInitialized,
+    /// [`crate::init_wm`] was already called
+    AlreadyInitialized,
+    /// A setup json (from AP, BLE, env or NVS) can't be parsed or used
+    InvalidSetup,
+    /// An embassy task couldn't be spawned (task pool full)
+    TaskSpawn,
 }
+
+impl core::fmt::Display for WmError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Wifi(e) => write!(f, "wifi error: {e}"),
+            Self::Nvs(e) => write!(f, "nvs error: {e}"),
+            Self::NvsPartitionNotFound => f.write_str("nvs partition not found"),
+            Self::NvsAlreadyInitialized => f.write_str("nvs already initialized"),
+            Self::AlreadyInitialized => f.write_str("wifimanager already initialized"),
+            Self::InvalidSetup => f.write_str("invalid wifi setup"),
+            Self::TaskSpawn => f.write_str("task spawn failed"),
+        }
+    }
+}
+
+impl core::error::Error for WmError {}
 
 impl From<esp_nvs::error::Error> for WmError {
     fn from(value: esp_nvs::error::Error) -> Self {
-        Self::NvsError(value)
+        Self::Nvs(value)
     }
 }
 
 impl From<WifiError> for WmError {
     fn from(value: WifiError) -> Self {
-        Self::WifiError(value)
+        Self::Wifi(value)
     }
 }
 
 impl From<SpawnError> for WmError {
     fn from(_value: SpawnError) -> Self {
-        Self::TaskSpawnError
-    }
-}
-
-impl From<serde_json::Error> for WmError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::SerdeError(value)
-    }
-}
-
-impl From<()> for WmError {
-    fn from(_value: ()) -> Self {
-        Self::Other
-    }
-}
-
-impl From<core::convert::Infallible> for WmError {
-    fn from(_value: core::convert::Infallible) -> Self {
-        Self::Other
+        Self::TaskSpawn
     }
 }
 
 #[derive(Clone)]
 pub struct WmSettings {
-    /// SSID, ble name and dhcp4 hostname
-    pub ssid: String,
+    /// AP SSID, BLE name and DHCP hostname
+    pub ssid: Ssid,
 
-    /// Panel hosted on AP (html)
+    /// Panel hosted on the AP (html)
     pub wifi_panel: &'static str,
 
-    /// Max time WiFi will try to connect (in ms)
-    pub wifi_conn_timeout: u64,
+    /// Max time a connection attempt may take
+    pub wifi_conn_timeout: Duration,
 
-    /// Delay on wifi reconnection after connection loss (in ms)
-    pub wifi_reconnect_time: u64,
+    /// Delay before reconnecting after the connection was lost
+    pub wifi_reconnect_time: Duration,
 
-    /// WiFi scan inverval (in ms)
-    pub wifi_scan_interval: u64,
+    /// Wifi scan interval while provisioning
+    pub wifi_scan_interval: Duration,
 
-    /// Time after which esp will restart while waiting for wifi setup (in ms)
-    pub esp_reset_timeout: Option<u64>,
+    /// Reset the chip if provisioning takes longer than this
+    pub esp_reset_timeout: Option<Duration>,
 
-    /// Indicates if esp should restart after succesfull first connection
+    /// Reset the chip after the first successful connection of a new setup
     pub esp_restart_after_connection: bool,
 
-    /// Signal that will be sent when wifi peripheral sends StaDisconnected or WifiConnected
-    pub wifi_conn_signal: Option<Rc<Signal<CriticalSectionRawMutex, bool>>>,
+    /// Signalled on every station connect (`true`) / disconnect (`false`)
+    pub wifi_conn_signal: Option<&'static ConnSignal>,
+
+    /// Signalled when provisioning (AP/BLE) starts
+    pub provisioning_signal: Option<&'static ProvisioningSignal>,
 }
 
 impl core::fmt::Debug for WmSettings {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WmSettings")
             .field("ssid", &self.ssid)
-            .field("wifi_panel", &self.wifi_panel)
             .field("wifi_conn_timeout", &self.wifi_conn_timeout)
             .field("wifi_reconnect_time", &self.wifi_reconnect_time)
             .field("wifi_scan_interval", &self.wifi_scan_interval)
@@ -108,22 +126,66 @@ impl core::fmt::Debug for WmSettings {
                 "esp_restart_after_connection",
                 &self.esp_restart_after_connection,
             )
-            .field(
-                "wifi_conn_signal",
-                &self.wifi_conn_signal.as_ref().map(|_| "Assigned"),
-            )
-            .finish()
+            .field("wifi_conn_signal", &self.wifi_conn_signal.is_some())
+            .field("provisioning_signal", &self.provisioning_signal.is_some())
+            .finish_non_exhaustive()
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub(crate) struct AutoSetupSettings {
-    pub ssid: String,
-    pub psk: String,
-    pub data: Option<serde_json::Value>,
+impl Default for WmSettings {
+    /// `ESP-<MAC>` as SSID, built-in panel
+    fn default() -> Self {
+        let mut ssid = Ssid::new();
+        // "ESP-" + at most 12 hex digits always fits in 32 bytes
+        _ = core::fmt::write(&mut ssid, format_args!("ESP-{:X}", get_efuse_mac()));
+
+        Self {
+            ssid,
+
+            #[cfg(not(feature = "custom_panel"))]
+            wifi_panel: include_minifier::include_minified!("src/panel.html"),
+
+            #[cfg(feature = "custom_panel")]
+            wifi_panel: "<h1>EMPTY PANEL</h1>",
+
+            wifi_reconnect_time: Duration::from_millis(1000),
+            wifi_conn_timeout: Duration::from_millis(15000),
+            wifi_scan_interval: Duration::from_millis(15000),
+
+            esp_reset_timeout: None,
+            esp_restart_after_connection: false,
+
+            wifi_conn_signal: None,
+            provisioning_signal: None,
+        }
+    }
 }
 
-impl AutoSetupSettings {
+/// Setup json `{"ssid": "...", "psk": "...", "data": <any json>}`, borrowed from its buffer.
+pub(crate) struct Setup<'a> {
+    pub ssid: Ssid,
+    pub psk: heapless::String<64>,
+    pub data: Option<&'a str>,
+}
+
+impl<'a> Setup<'a> {
+    pub fn parse(raw: &'a [u8]) -> Result<Self> {
+        #[derive(Deserialize)]
+        struct Json<'a> {
+            ssid: Ssid,
+            psk: heapless::String<64>,
+            #[serde(borrow, default)]
+            data: Option<&'a RawValue>,
+        }
+
+        let json: Json = serde_json::from_slice(raw).map_err(|_| WmError::InvalidSetup)?;
+        Ok(Self {
+            ssid: json.ssid,
+            psk: json.psk,
+            data: json.data.map(RawValue::get),
+        })
+    }
+
     pub fn to_configuration(&self) -> Result<Config> {
         Ok(Config::Station(self.to_station()?))
     }
@@ -141,65 +203,53 @@ impl AutoSetupSettings {
     }
 }
 
-impl Default for WmSettings {
-    /// Defaults for esp32 (with defaut partition schema)
-    ///
-    /// Checked on esp32s3 and esp32c3
-    fn default() -> Self {
-        Self {
-            ssid: alloc::format!("ESP-{:X}", get_efuse_mac()),
+/// Wifi connected: the station stack plus radio control.
+///
+/// The connection is kept up by a background task (reconnects on loss).
+pub struct WifiManager {
+    pub(crate) stack: Stack<'static>,
+    pub(crate) ip: Ipv4Addr,
+    pub(crate) setup: SetupData,
+}
 
-            #[cfg(not(feature = "custom_panel"))]
-            wifi_panel: include_minifier::include_minified!("src/panel.html"),
-
-            #[cfg(feature = "custom_panel")]
-            wifi_panel: "<h1>EMPTY PANEL</h1>",
-
-            wifi_reconnect_time: 1000,
-            wifi_conn_timeout: 15000,
-            wifi_scan_interval: 15000,
-
-            esp_reset_timeout: None,
-            esp_restart_after_connection: false,
-
-            wifi_conn_signal: None,
-        }
+impl WifiManager {
+    /// Station network stack
+    pub fn stack(&self) -> Stack<'static> {
+        self.stack
     }
-}
 
-pub struct WmReturn {
-    pub sta_stack: Stack<'static>,
-    pub data: Option<serde_json::Value>,
-    pub ip_address: [u8; 4],
+    /// IP address got from DHCP
+    pub fn ip(&self) -> Ipv4Addr {
+        self.ip
+    }
 
-    pub(crate) stop_signal: Rc<Signal<CriticalSectionRawMutex, bool>>,
-}
+    /// The `data` field of the setup as raw json (e.g. `{"mdns":true}`), parse it yourself.
+    pub fn data(&self) -> Option<&str> {
+        Setup::parse(&self.setup).ok()?.data
+    }
 
-impl WmReturn {
-    // Disconnects from current wifi and stops wifi radio
+    /// Disconnects from wifi and stops the radio
     pub fn stop_radio(&self) {
-        self.stop_signal.signal(true);
+        crate::RADIO_CMD.signal(true);
     }
 
-    // Starts radio and reconnect to wifi
-    // You can only use it after `stop_radio()`
+    /// Starts the radio again and reconnects (after [`WifiManager::stop_radio`])
     pub fn restart_radio(&self) {
-        self.stop_signal.signal(false);
+        crate::RADIO_CMD.signal(false);
     }
 }
 
-impl ::core::fmt::Debug for WmReturn {
-    #[inline]
-    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-        f.debug_struct("WmReturn")
-            .field("data", &self.data)
-            .field("ip_address", &self.ip_address)
-            .finish()
+impl core::fmt::Debug for WifiManager {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        f.debug_struct("WifiManager")
+            .field("ip", &self.ip)
+            .field("data", &self.data())
+            .finish_non_exhaustive()
     }
 }
 
-pub struct WmInnerSignals {
-    pub wifi_scan_res: Mutex<NoopRawMutex, alloc::string::String>,
+pub(crate) struct WmInnerSignals {
+    pub wifi_scan_res: Mutex<NoopRawMutex, heapless::String<SCAN_LIST_LEN>>,
 
     /// This is used to tell main task to connect to wifi
     pub wifi_conn_info_sig: Signal<NoopRawMutex, SetupData>,
@@ -211,9 +261,9 @@ pub struct WmInnerSignals {
 }
 
 impl WmInnerSignals {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            wifi_scan_res: Mutex::new(alloc::string::String::new()),
+            wifi_scan_res: Mutex::new(heapless::String::new()),
             wifi_conn_info_sig: Signal::new(),
             wifi_conn_res_sig: Signal::new(),
             end_signal_pubsub: PubSubChannel::new(),

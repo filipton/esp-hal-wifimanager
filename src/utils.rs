@@ -1,11 +1,11 @@
+use core::net::Ipv4Addr;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
 use esp_radio::wifi::WifiController;
 
 #[cfg(feature = "ap")]
 use {
-    crate::{structs::WmInnerSignals, Result, WmSettings},
-    alloc::rc::Rc,
+    crate::{structs::WmInnerSignals, Result},
     embassy_executor::Spawner,
     embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4},
     esp_radio::wifi::Interface,
@@ -15,8 +15,8 @@ use {
 pub async fn spawn_ap(
     rng: &esp_hal::rng::Rng,
     spawner: &Spawner,
-    wm_signals: Rc<WmInnerSignals>,
-    settings: WmSettings,
+    wm_signals: &'static WmInnerSignals,
+    wifi_panel: &'static str,
     ap_interface: Interface,
 ) -> Result<()> {
     let ap_ip = crate::ap::AP_IP;
@@ -37,29 +37,24 @@ pub async fn spawn_ap(
         rng.random() as u64,
     );
 
-    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone())?);
-    spawner.spawn(crate::ap::run_dhcp_server(ap_stack, wm_signals.clone())?);
-    crate::http::run_http_server(spawner, ap_stack, wm_signals, settings.wifi_panel).await
+    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals)?);
+    spawner.spawn(crate::ap::run_dhcp_server(ap_stack, wm_signals)?);
+    crate::http::run_http_server(spawner, ap_stack, wm_signals, wifi_panel).await
 }
 
 pub async fn try_to_wifi_connect(
     controller: &mut WifiController<'static>,
-    wifi_conn_timeout: u64,
+    wifi_conn_timeout: Duration,
 ) -> bool {
     let start_time = embassy_time::Instant::now();
 
     loop {
-        if start_time.elapsed().as_millis() > wifi_conn_timeout {
+        if start_time.elapsed() > wifi_conn_timeout {
             log::warn!("Connect timeout (1)!");
             return false;
         }
 
-        match with_timeout(
-            Duration::from_millis(wifi_conn_timeout),
-            controller.connect_async(),
-        )
-        .await
-        {
+        match with_timeout(wifi_conn_timeout, controller.connect_async()).await {
             Ok(res) => match res {
                 Ok(_) => {
                     log::info!("Wifi connected!");
@@ -78,23 +73,19 @@ pub async fn try_to_wifi_connect(
     }
 }
 
-pub async fn wifi_wait_for_ip(stack: &Stack<'static>) -> [u8; 4] {
+pub async fn wifi_wait_for_ip(stack: &Stack<'static>) -> Ipv4Addr {
     while !stack.is_link_up() {
         Timer::after(Duration::from_millis(50)).await;
     }
 
     log::info!("Waiting to get IP address...");
-    let mut ip = [0; 4];
     loop {
         if let Some(config) = stack.config_v4() {
             log::info!("Got IP: {}", config.address);
-            ip.copy_from_slice(&config.address.address().octets());
-            break;
+            return config.address.address();
         }
         Timer::after(Duration::from_millis(50)).await;
     }
-
-    ip
 }
 
 pub fn get_efuse_mac() -> u64 {

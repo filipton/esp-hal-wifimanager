@@ -1,5 +1,4 @@
-use crate::structs::{SetupData, WmInnerSignals};
-use alloc::{rc::Rc, string::String};
+use crate::structs::{SetupData, Ssid, WmInnerSignals};
 use embassy_futures::select::select3;
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
@@ -77,7 +76,7 @@ impl SetupAccumulator {
 }
 
 #[embassy_executor::task]
-pub async fn bluetooth_task(bt: BT<'static>, name: String, signals: Rc<WmInnerSignals>) {
+pub async fn bluetooth_task(bt: BT<'static>, name: Ssid, signals: &'static WmInnerSignals) {
     let Ok(connector) = BleConnector::new(bt, esp_radio::ble::Config::default()) else {
         log::error!("[ble] cannot init ble connector");
         return;
@@ -119,7 +118,7 @@ pub async fn bluetooth_task(bt: BT<'static>, name: String, signals: Rc<WmInnerSi
     let serve = async {
         loop {
             match advertise(&name, &mut peripheral, &server).await {
-                Ok(conn) => serve_connection(&server, &conn, &signals).await,
+                Ok(conn) => serve_connection(&server, &conn, signals).await,
                 Err(e) => {
                     log::error!("[ble] advertise error: {e:?}");
                     Timer::after_millis(ERROR_RETRY_MS).await;
@@ -128,7 +127,7 @@ pub async fn bluetooth_task(bt: BT<'static>, name: String, signals: Rc<WmInnerSi
         }
     };
 
-    select3(run, serve, wait_for_wifi_connected(&signals)).await;
+    select3(run, serve, wait_for_wifi_connected(signals)).await;
     log::debug!("[ble] stopped");
 }
 

@@ -1,5 +1,4 @@
 use crate::structs::{SetupData, WmInnerSignals};
-use alloc::rc::Rc;
 use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
@@ -131,7 +130,7 @@ const UPDATE_PANEL_HTML: &str = "<html><body><p>OTA updates disabled</p></body><
 
 async fn handle_request(
     request: HttpRequest<'_>,
-    signals: &Rc<WmInnerSignals>,
+    signals: &WmInnerSignals,
     wifi_panel_str: &'static str,
     socket: &mut TcpSocket<'_>,
 ) {
@@ -162,7 +161,7 @@ async fn handle_request(
 #[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
 async fn web_task(
     stack: Stack<'static>,
-    signals: Rc<WmInnerSignals>,
+    signals: &'static WmInnerSignals,
     wifi_panel_str: &'static str,
 ) {
     let fut = async {
@@ -182,7 +181,7 @@ async fn web_task(
 
             match read_request(&mut socket, &mut http_buffer).await {
                 Some(n) => match parse_http_request(&http_buffer[..n]) {
-                    Some(req) => handle_request(req, &signals, wifi_panel_str, &mut socket).await,
+                    Some(req) => handle_request(req, signals, wifi_panel_str, &mut socket).await,
                     None => {
                         _ = write_response(&mut socket, "400 Bad Request", "text/plain", b"").await
                     }
@@ -237,7 +236,7 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) {
         .await;
         return;
     };
-    if let Err(e) = ota.ota_begin(size, crc) {
+    if let Err(e) = ota.begin(size, crc) {
         log::warn!("Ota begin error: {e:?}");
         _ = write_response(
             socket,
@@ -288,9 +287,9 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) {
         );
         _ = write_all(socket, progress.as_bytes()).await;
 
-        match ota.ota_write_chunk(&ota_buffer[..buffer_pos]) {
+        match ota.write(&ota_buffer[..buffer_pos]) {
             Ok(true) => {
-                if ota.ota_flush(true, true).is_ok() {
+                if ota.finish(true).is_ok() {
                     log::info!("OTA restart!");
                     _ = write_all(socket, b"DONE:OTA Update Successful. Restarting...\n").await;
                     Timer::after(Duration::from_millis(100)).await;
@@ -319,11 +318,11 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) {
 pub async fn run_http_server(
     spawner: &Spawner,
     ap_stack: Stack<'static>,
-    signals: Rc<WmInnerSignals>,
+    signals: &'static WmInnerSignals,
     wifi_panel_str: &'static str,
 ) -> crate::Result<()> {
     for _ in 0..WEB_TASK_POOL_SIZE {
-        spawner.spawn(web_task(ap_stack, signals.clone(), wifi_panel_str)?);
+        spawner.spawn(web_task(ap_stack, signals, wifi_panel_str)?);
     }
 
     Ok(())

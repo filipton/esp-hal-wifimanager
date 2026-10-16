@@ -1,11 +1,16 @@
 [package]
 name = "esp-hal-wifimanager"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 description = "Wifi Manager for esp-hal (bt+wifi ap)"
 repository = "https://github.com/filipton/esp-hal-wifimanager"
 
+
+[package.metadata.docs.rs]
+features = ["esp32c3", "ap", "ble", "ota"]
+default-target = "riscv32imc-unknown-none-elf"
+targets = ["riscv32imc-unknown-none-elf"]
 
 [lib]
 
@@ -18,7 +23,7 @@ static_cell = { version = "2.1.1" }
 log = "0.4.34"
 embassy-time = { version = "0.5.1", default-features = false }
 embassy-executor = { version = "0.10.0", default-features = false }
-heapless = { version = "0.9.3", default-features = false }
+heapless = { version = "0.9.3", default-features = false, features = ["serde"] }
 embassy-sync = { version = "0.8.0", default-features = false }
 esp-storage = { version = "0.10.0", default-features = false, features = ["critical-section", "embedded-storage"] }
 embedded-storage = "0.3.2"
@@ -27,18 +32,17 @@ edge-nal = { version = "0.7.0", optional = true, default-features = false }
 edge-nal-embassy = { version = "0.9.0", optional = true, default-features = false, features = ["proto-ipv4", "medium-ethernet", "udp"] }
 embassy-futures = "0.1.2"
 serde = { version = "1.0.229", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1.0.154", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0.154", default-features = false, features = ["alloc", "raw_value"] }
 embedded-io-async = "0.7.0"
 portable-atomic = { version = "1.15.0", default-features = false }
 trouble-host = { version = "0.7.0", optional = true }
 esp-nvs = "0.6.2"
-esp-hal-ota = { version = "0.6.1", optional = true, features = ["log"] }
+esp-hal-ota = { version = "0.7.0", optional = true, features = ["log"] }
 include-minifier = "0.1.0"
 
 [features]
-#default = []
-#default = ["esp32s3", "ap", "ble"]
-default = ["esp32s3", "ap", "ble", "ota"]
+# pick exactly one chip feature yourself
+default = ["ap", "ble", "ota"]
 
 esp32s2 = ["esp-hal/esp32s2","esp-radio/esp32s2","esp-rtos/esp32s2","esp-storage/esp32s2", "esp-hal-ota?/esp32s2"]
 esp32s3 = ["esp-hal/esp32s3","esp-radio/esp32s3","esp-rtos/esp32s3","esp-storage/esp32s3", "esp-hal-ota?/esp32s3"]

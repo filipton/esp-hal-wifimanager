@@ -1,9 +1,11 @@
-use alloc::rc::Rc;
+use crate::WmError;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
 use embedded_storage::nor_flash::{ErrorType, NorFlash, ReadNorFlash};
+use esp_hal::peripherals::FLASH;
 use esp_nvs::{Get, Key, Set};
 use esp_storage::FlashStorage;
-use portable_atomic::{AtomicU8, Ordering};
+use portable_atomic::{AtomicBool, Ordering};
+use static_cell::StaticCell;
 
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
@@ -48,142 +50,106 @@ impl NorFlash for NvsFlash {
 }
 
 const WIFIMANAGER_NAMESPACE: Key = Key::from_str("wifimanager");
-static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
+/// Claimed while an instance is being created or exists (there can only be one)
+static NVS_TAKEN: AtomicBool = AtomicBool::new(false);
+static NVS: StaticCell<Nvs> = StaticCell::new();
+
+/// NVS (ESP-IDF compatible key-value flash storage) in the `wifimanager` namespace.
+///
+/// Created once and shared as `&'static Nvs`; keys are [`Key`] consts, e.g.
+/// `const MY_KEY: Key = Key::from_str("MY_KEY");` (max 15 chars, checked at compile time).
 pub struct Nvs {
-    inner: Rc<Mutex<CriticalSectionRawMutex, esp_nvs::Nvs<NvsFlash>>>,
-
-    offset: usize,
-    size: usize,
+    inner: Mutex<CriticalSectionRawMutex, esp_nvs::Nvs<NvsFlash>>,
 }
 
 impl Nvs {
-    pub fn new(
-        flash_offset: usize,
-        flash_size: usize,
-        flash: esp_hal::peripherals::FLASH<'static>,
-    ) -> crate::Result<Self> {
-        if NVS_INSTANCES
-            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+    /// Opens the `nvs` partition from the partition table.
+    pub fn new(mut flash: FLASH<'static>) -> crate::Result<&'static Self> {
+        let (offset, size) = Self::read_nvs_partition_offset(flash.reborrow())
+            .ok_or(WmError::NvsPartitionNotFound)?;
+        Self::new_at(offset, size, flash)
+    }
+
+    /// Opens NVS at an explicit flash `offset` and `size`.
+    pub fn new_at(
+        offset: usize,
+        size: usize,
+        flash: FLASH<'static>,
+    ) -> crate::Result<&'static Self> {
+        if NVS_TAKEN
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            log::error!("Cannot spawn new NVS struct, clone original one instead!");
-            return Err(crate::WmError::Other);
+            return Err(WmError::NvsAlreadyInitialized);
         }
 
-        // SAFETY: the instance slot was just claimed above
-        let res = unsafe { Self::new_unchecked(flash_offset, flash_size, flash) };
-        if res.is_err() {
-            NVS_INSTANCES.store(0, Ordering::Release);
-        }
-        res
-    }
+        let nvs = match esp_nvs::Nvs::new(offset, size, NvsFlash(FlashStorage::new(flash))) {
+            Ok(nvs) => nvs,
+            Err(e) => {
+                NVS_TAKEN.store(false, Ordering::Release);
+                return Err(e.into());
+            }
+        };
 
-    /// # Safety
-    ///
-    /// This is not checking if other nvs instance already exists (there should be only one nvs
-    /// instancce!)
-    pub unsafe fn new_unchecked(
-        flash_offset: usize,
-        flash_size: usize,
-        flash: esp_hal::peripherals::FLASH<'static>,
-    ) -> crate::Result<Self> {
-        let storage = esp_storage::FlashStorage::new(unsafe { flash.clone_unchecked() });
-
-        Ok(Nvs {
-            inner: Rc::new(Mutex::new(esp_nvs::Nvs::new(
-                flash_offset,
-                flash_size,
-                NvsFlash(storage),
-            )?)),
-
-            offset: flash_offset,
-            size: flash_size,
+        // the claim above guarantees this runs once
+        NVS.try_init(Nvs {
+            inner: Mutex::new(nvs),
         })
+        .map(|nvs| &*nvs)
+        .ok_or(WmError::NvsAlreadyInitialized)
     }
 
-    pub fn new_from_part_table(flash: esp_hal::peripherals::FLASH<'static>) -> crate::Result<Self> {
-        if let Some((offset, size)) =
-            Self::read_nvs_partition_offset(unsafe { flash.clone_unchecked() })
-        {
-            Self::new(offset, size, flash)
-        } else {
-            log::error!("Nvs partition not found!");
-            Err(crate::WmError::Other)
-        }
-    }
+    /// `(offset, size)` of the `nvs` partition from the partition table.
+    pub fn read_nvs_partition_offset(flash: FLASH<'_>) -> Option<(usize, usize)> {
+        let mut flash = FlashStorage::new(flash);
 
-    pub fn read_nvs_partition_offset(
-        flash: esp_hal::peripherals::FLASH<'static>,
-    ) -> Option<(usize, usize)> {
-        let mut flash = esp_storage::FlashStorage::new(flash);
-
-        let mut nvs_part = None;
         let mut bytes = [0xFF; 32];
         for read_offset in (0..PART_SIZE).step_by(32) {
-            _ = flash.read(PART_OFFSET + read_offset, &mut bytes);
+            flash.read(PART_OFFSET + read_offset, &mut bytes).ok()?;
             if bytes == [0xFF; 32] {
                 break;
             }
 
-            let magic = &bytes[0..2];
-            if magic != [0xAA, 0x50] {
+            if bytes[0..2] != [0xAA, 0x50] {
                 continue;
             }
 
-            let p_type = &bytes[2];
-            let p_subtype = &bytes[3];
-            let p_offset = u32::from_le_bytes(bytes[4..8].try_into().unwrap_or_default());
-            let p_size = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or_default());
-            //let p_name = core::str::from_utf8(&bytes[12..28]).unwrap_or_default();
-            //let p_flags = u32::from_le_bytes(bytes[28..32].try_into().unwrap_or_default());
-            //log::info!("{magic:?} {p_type} {p_subtype} {p_offset} {p_size} {p_name} {p_flags}");
-
-            if *p_type == 1 && *p_subtype == 2 {
-                nvs_part = Some((p_offset, p_size));
-                break;
+            // type data (1), subtype nvs (2)
+            if bytes[2] == 1 && bytes[3] == 2 {
+                let offset = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+                let size = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+                return Some((offset as usize, size as usize));
             }
         }
 
-        nvs_part.map(|(offset, size)| (offset as usize, size as usize))
+        None
     }
 
-    pub async fn get<R>(&self, key: &str) -> crate::Result<R>
+    pub async fn get<R>(&self, key: &Key) -> crate::Result<R>
     where
         esp_nvs::Nvs<NvsFlash>: Get<R>,
     {
-        let mut d = self.inner.lock().await;
-        Ok(d.get(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?)
+        Ok(self.inner.lock().await.get(&WIFIMANAGER_NAMESPACE, key)?)
     }
 
-    pub async fn set<R>(&self, key: &str, value: R) -> crate::Result<()>
+    /// Sets (or overwrites) `key`.
+    pub async fn set<R>(&self, key: &Key, value: R) -> crate::Result<()>
     where
         esp_nvs::Nvs<NvsFlash>: Set<R>,
     {
-        let mut d = self.inner.lock().await;
-        Ok(d.set(&WIFIMANAGER_NAMESPACE, &Key::from_str(key), value)?)
+        Ok(self
+            .inner
+            .lock()
+            .await
+            .set(&WIFIMANAGER_NAMESPACE, key, value)?)
     }
 
-    pub async fn delete(&self, key: &str) -> crate::Result<()> {
-        let mut d = self.inner.lock().await;
-        Ok(d.delete(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?)
-    }
-}
-
-impl Drop for Nvs {
-    fn drop(&mut self) {
-        NVS_INSTANCES.fetch_sub(1, Ordering::Relaxed);
-    }
-}
-
-impl Clone for Nvs {
-    fn clone(&self) -> Self {
-        NVS_INSTANCES.fetch_add(1, Ordering::Relaxed);
-
-        Self {
-            inner: self.inner.clone(),
-            offset: self.offset,
-            size: self.size,
-        }
+    pub async fn delete(&self, key: &Key) -> crate::Result<()> {
+        Ok(self
+            .inner
+            .lock()
+            .await
+            .delete(&WIFIMANAGER_NAMESPACE, key)?)
     }
 }
