@@ -1,24 +1,25 @@
-use crate::{structs::WmInnerSignals, Result, WmSettings};
-use alloc::rc::Rc;
-use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::{with_timeout, Duration, Timer};
-#[cfg(feature = "ap")]
-use esp_radio::wifi::Interface;
 use esp_radio::wifi::WifiController;
 
 #[cfg(feature = "ap")]
-use embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4};
+use {
+    crate::{structs::WmInnerSignals, Result, WmSettings},
+    alloc::rc::Rc,
+    embassy_executor::Spawner,
+    embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4},
+    esp_radio::wifi::Interface,
+};
 
 #[cfg(feature = "ap")]
 pub async fn spawn_ap(
-    rng: &mut esp_hal::rng::Rng,
+    rng: &esp_hal::rng::Rng,
     spawner: &Spawner,
     wm_signals: Rc<WmInnerSignals>,
     settings: WmSettings,
     ap_interface: Interface,
 ) -> Result<()> {
-    let ap_ip = embassy_net::Ipv4Address::new(192, 168, 4, 1);
+    let ap_ip = crate::ap::AP_IP;
     let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
         address: Ipv4Cidr::new(ap_ip, 24),
         gateway: Some(ap_ip),
@@ -37,10 +38,8 @@ pub async fn spawn_ap(
     );
 
     spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals.clone())?);
-    spawner.spawn(crate::ap::run_dhcp_server(ap_stack)?);
-    crate::http::run_http_server(spawner, ap_stack, wm_signals.clone(), settings.wifi_panel).await;
-
-    Ok(())
+    spawner.spawn(crate::ap::run_dhcp_server(ap_stack, wm_signals.clone())?);
+    crate::http::run_http_server(spawner, ap_stack, wm_signals, settings.wifi_panel).await
 }
 
 pub async fn try_to_wifi_connect(

@@ -1,9 +1,9 @@
 use alloc::rc::Rc;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use esp_nvs::{Get, Key, Set};
 use embedded_storage::nor_flash::{ErrorType, NorFlash, ReadNorFlash};
+use esp_nvs::{Get, Key, Set};
 use esp_storage::FlashStorage;
-use portable_atomic::AtomicU8;
+use portable_atomic::{AtomicU8, Ordering};
 
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
@@ -63,13 +63,20 @@ impl Nvs {
         flash_size: usize,
         flash: esp_hal::peripherals::FLASH<'static>,
     ) -> crate::Result<Self> {
-        if NVS_INSTANCES.load(core::sync::atomic::Ordering::Relaxed) > 0 {
+        if NVS_INSTANCES
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
             log::error!("Cannot spawn new NVS struct, clone original one instead!");
             return Err(crate::WmError::Other);
         }
 
-        NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        unsafe { Self::new_unchecked(flash_offset, flash_size, flash) }
+        // SAFETY: the instance slot was just claimed above
+        let res = unsafe { Self::new_unchecked(flash_offset, flash_size, flash) };
+        if res.is_err() {
+            NVS_INSTANCES.store(0, Ordering::Release);
+        }
+        res
     }
 
     /// # Safety
@@ -165,13 +172,13 @@ impl Nvs {
 
 impl Drop for Nvs {
     fn drop(&mut self) {
-        NVS_INSTANCES.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        NVS_INSTANCES.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
 impl Clone for Nvs {
     fn clone(&self) -> Self {
-        NVS_INSTANCES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        NVS_INSTANCES.fetch_add(1, Ordering::Relaxed);
 
         Self {
             inner: self.inner.clone(),

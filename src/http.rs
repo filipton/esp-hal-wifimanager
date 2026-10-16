@@ -1,12 +1,8 @@
-use crate::structs::WmInnerSignals;
-#[cfg(feature = "ota")]
-use alloc::format;
+use crate::structs::{SetupData, WmInnerSignals};
 use alloc::rc::Rc;
 use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
-#[cfg(feature = "ota")]
-use embedded_io_async::Write;
 
 const WEB_TASK_POOL_SIZE: usize = 2;
 const HTTP_BUFFER_SIZE: usize = 2048;
@@ -15,48 +11,87 @@ const HTTP_HEADER_BUFFER_SIZE: usize = 192;
 struct HttpRequest<'a> {
     method: &'a str,
     path: &'a str,
-    headers: &'a [u8],
+    headers: &'a str,
     body: &'a [u8],
 }
 
-fn parse_http_request(buffer: &[u8]) -> Option<HttpRequest<'_>> {
-    let header_end = buffer.windows(4).position(|window| window == b"\r\n\r\n")?;
+impl HttpRequest<'_> {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.split("\r\n").find_map(|line| {
+            let (k, v) = line.split_once(':')?;
+            k.trim().eq_ignore_ascii_case(name).then_some(v.trim())
+        })
+    }
 
+    fn content_length(&self) -> Option<usize> {
+        self.header("Content-Length")?.parse().ok()
+    }
+
+    #[cfg(feature = "ota")]
+    fn query(&self, key: &str) -> Option<&str> {
+        let (_, query) = self.path.split_once('?')?;
+        query.split('&').find_map(|kv| {
+            kv.split_once('=')
+                .filter(|(k, _)| *k == key)
+                .map(|(_, v)| v)
+        })
+    }
+
+    fn is(&self, method: &str, path: &str) -> bool {
+        let route = self.path.split('?').next().unwrap_or_default();
+        self.method.eq_ignore_ascii_case(method) && route == path
+    }
+}
+
+fn header_end(buffer: &[u8]) -> Option<usize> {
+    buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_http_request(buffer: &[u8]) -> Option<HttpRequest<'_>> {
+    let header_end = header_end(buffer)?;
     let header_section = core::str::from_utf8(&buffer[..header_end]).ok()?;
 
-    let mut lines = header_section.lines();
-    let first_line = lines.next()?;
+    let (first_line, headers) = header_section
+        .split_once("\r\n")
+        .unwrap_or((header_section, ""));
     let mut parts = first_line.split_whitespace();
-    let method = parts.next()?;
-    let path = parts.next()?;
-
-    let headers_start = header_section.find("\r\n").map(|i| i + 2).unwrap_or(0);
-    let headers = &buffer[headers_start..header_end];
-
-    let body = &buffer[header_end + 4..];
 
     Some(HttpRequest {
-        method,
-        path,
+        method: parts.next()?,
+        path: parts.next()?,
         headers,
-        body,
+        body: &buffer[header_end + 4..],
     })
 }
 
-async fn write_all_to_socket(socket: &mut TcpSocket<'_>, mut data: &[u8]) -> bool {
-    while !data.is_empty() {
-        match socket.write(data).await {
-            Ok(0) => break,
-            Ok(n) => data = &data[n..],
-            Err(e) => {
-                log::error!("Http wifimanager write error: {e:?}");
-                return false;
+/// Reads the head and, for requests other than the OTA upload (streamed later), the whole body.
+/// Returns the number of bytes in `buf`, or `None` when the request doesn't fit or the peer stalls
+/// (the socket timeout ends slow clients).
+async fn read_request(socket: &mut TcpSocket<'_>, buf: &mut [u8]) -> Option<usize> {
+    let mut total = 0;
+    loop {
+        if let Some(req) = parse_http_request(&buf[..total]) {
+            if req.is("POST", "/update") {
+                return Some(total);
             }
+
+            let head_len = total - req.body.len();
+            let needed = head_len.saturating_add(req.content_length().unwrap_or(0));
+            if total >= needed {
+                return Some(total);
+            }
+            if needed > buf.len() {
+                return None;
+            }
+        } else if total == buf.len() {
+            return None;
+        }
+
+        match socket.read(&mut buf[total..]).await {
+            Ok(0) | Err(_) => return (total > 0).then_some(total),
+            Ok(n) => total += n,
         }
     }
-
-    _ = socket.flush().await;
-    data.is_empty()
 }
 
 async fn write_response(
@@ -69,18 +104,24 @@ async fn write_response(
     _ = core::fmt::write(
         &mut header,
         format_args!(
-            "HTTP/1.1 {}\r\nContent-Type: {}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            status,
-            content_type,
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         ),
     );
 
-    if !write_all_to_socket(socket, header.as_bytes()).await {
-        return false;
-    }
+    write_all(socket, header.as_bytes()).await && write_all(socket, body).await
+}
 
-    write_all_to_socket(socket, body).await
+async fn write_all(socket: &mut TcpSocket<'_>, data: &[u8]) -> bool {
+    use embedded_io_async::Write;
+
+    match socket.write_all(data).await {
+        Ok(()) => socket.flush().await.is_ok(),
+        Err(e) => {
+            log::error!("Http wifimanager write error: {e:?}");
+            false
+        }
+    }
 }
 
 #[cfg(feature = "ota")]
@@ -94,35 +135,32 @@ async fn handle_request(
     wifi_panel_str: &'static str,
     socket: &mut TcpSocket<'_>,
 ) {
-    match (request.method, request.path) {
-        ("GET", "/") => {
-            _ = write_response(socket, "200 OK", "text/html", wifi_panel_str.as_bytes()).await;
-        }
-        ("GET", "/update") => {
-            _ = write_response(socket, "200 OK", "text/html", UPDATE_PANEL_HTML.as_bytes()).await;
-        }
-        ("GET", "/list") => {
-            let scan_res = signals.wifi_scan_res.try_lock();
-            let resp = match scan_res {
-                Ok(ref resp) => resp.as_str(),
-                Err(_) => "",
-            };
-            _ = write_response(socket, "200 OK", "text/plain", resp.as_bytes()).await;
-        }
-        ("POST", "/setup") => {
-            let body_vec = request.body.to_vec();
-            signals.wifi_conn_info_sig.signal(body_vec);
-            _ = write_response(socket, "200 OK", "text/plain", b".").await;
-        }
-        _ => {
-            _ = write_response(socket, "404 Not Found", "text/plain", b"Not Found").await;
-        }
+    if request.is("GET", "/") {
+        _ = write_response(socket, "200 OK", "text/html", wifi_panel_str.as_bytes()).await;
+    } else if request.is("GET", "/update") {
+        _ = write_response(socket, "200 OK", "text/html", UPDATE_PANEL_HTML.as_bytes()).await;
+    } else if request.is("GET", "/list") {
+        let scan_res = signals.wifi_scan_res.try_lock();
+        let resp = scan_res.as_ref().map(|s| s.as_str()).unwrap_or_default();
+        _ = write_response(socket, "200 OK", "text/plain", resp.as_bytes()).await;
+    } else if request.is("POST", "/setup") {
+        let Ok(setup) = SetupData::from_slice(request.body) else {
+            _ = write_response(socket, "413 Payload Too Large", "text/plain", b"Too large").await;
+            return;
+        };
+
+        signals.wifi_conn_info_sig.signal(setup);
+        _ = write_response(socket, "200 OK", "text/plain", b".").await;
+    } else if cfg!(feature = "ota") && request.is("POST", "/update") {
+        #[cfg(feature = "ota")]
+        handle_update_req(request, socket).await;
+    } else {
+        _ = write_response(socket, "404 Not Found", "text/plain", b"Not Found").await;
     }
 }
 
 #[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
 async fn web_task(
-    _id: usize,
     stack: Stack<'static>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
@@ -130,62 +168,31 @@ async fn web_task(
     let fut = async {
         let mut rx_buffer = [0; 1024];
         let mut tx_buffer = [0; 1024];
+        // heap, not task memory: only needed while the AP runs
         let mut http_buffer = alloc::vec![0; HTTP_BUFFER_SIZE];
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(10)));
-        socket.set_nagle_enabled(false);
         loop {
+            socket.set_timeout(Some(Duration::from_secs(10)));
+            socket.set_nagle_enabled(false);
             if socket.accept(80).await.is_err() {
                 Timer::after(Duration::from_millis(5)).await;
                 continue;
             }
 
-            // read req
-            let mut total_read = 0;
-            loop {
-                match socket.read(&mut http_buffer[total_read..]).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        total_read += n;
-                        if http_buffer[..total_read]
-                            .windows(4)
-                            .any(|w| w == b"\r\n\r\n")
-                        {
-                            break;
-                        }
-                        if total_read >= HTTP_BUFFER_SIZE {
-                            break;
-                        }
+            match read_request(&mut socket, &mut http_buffer).await {
+                Some(n) => match parse_http_request(&http_buffer[..n]) {
+                    Some(req) => handle_request(req, &signals, wifi_panel_str, &mut socket).await,
+                    None => {
+                        _ = write_response(&mut socket, "400 Bad Request", "text/plain", b"").await
                     }
-                    Err(_) => break,
+                },
+                None => {
+                    _ = write_response(&mut socket, "413 Payload Too Large", "text/plain", b"")
+                        .await
                 }
             }
 
-            if total_read == 0 {
-                socket.close();
-                continue;
-            }
-
-            // parse and handle request
-            if let Some(req) = parse_http_request(&http_buffer[..total_read]) {
-                if req.path.starts_with("/update") && req.method.to_uppercase() == "POST" {
-                    #[cfg(feature = "ota")]
-                    if handle_update_req(req, &mut socket).await.is_none() {
-                        _ = write_response(
-                            &mut socket,
-                            "500 Internal Server Error",
-                            "text/plain",
-                            b"Update handler failed",
-                        )
-                        .await;
-                    }
-                } else {
-                    handle_request(req, &signals, wifi_panel_str, &mut socket).await;
-                }
-            }
-
-            Timer::after_millis(5).await;
             socket.close();
             Timer::after_millis(5).await;
             socket.abort();
@@ -195,120 +202,118 @@ async fn web_task(
     embassy_futures::select::select(fut, signals.end_signalled()).await;
 }
 
+/// Streams the firmware into the OTA partition. The response is sent before the upload ends,
+/// as `PROGRESS:<received>,<total>` lines and a final `DONE:` or `ERROR:` line.
 #[cfg(feature = "ota")]
-async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) -> Option<()> {
-    let query = req.path.split("?").nth(1)?;
-
-    let mut query = query.split("&").map(|q| {
-        let mut split = q.split("=");
-        (
-            split.next().unwrap_or_default(),
-            split.next().unwrap_or_default(),
+async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) {
+    let params = (|| {
+        let size: u32 = req.query("size")?.trim().parse().ok()?;
+        let crc: u32 = req.query("crc")?.trim().parse().ok()?;
+        Some((size, crc, req.content_length()?))
+    })();
+    let Some((size, crc, content_length)) = params else {
+        _ = write_response(
+            socket,
+            "400 Bad Request",
+            "text/plain",
+            b"ERROR:bad request\n",
         )
-    });
-
-    let size: u32 = query.find(|(k, _)| *k == "size")?.1.trim().parse().ok()?;
-    let crc: u32 = query.find(|(k, _)| *k == "crc")?.1.trim().parse().ok()?;
+        .await;
+        return;
+    };
 
     log::info!("Start ota update. Size: {size} crc: {crc}");
-    let headers = core::str::from_utf8(req.headers).ok()?;
-    let content_length: usize = headers
-        .split("\r\n")
-        .map(|h| {
-            let mut split = h.splitn(2, ": ");
-            let k = split.next().unwrap_or_default();
-            let v = split.next().unwrap_or_default();
-            (k, v)
-        })
-        .find(|(k, _)| k.to_uppercase() == "CONTENT-LENGTH")?
-        .1
-        .trim()
-        .parse()
-        .ok()?;
-
-    let mut ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
+    // SAFETY: flash is only used here while the wifimanager AP runs
+    let ota = esp_hal_ota::Ota::new(esp_storage::FlashStorage::new(unsafe {
         esp_hal::peripherals::FLASH::steal()
-    }))
-    .ok()?;
-    let res = ota.ota_begin(size, crc);
-    if let Err(e) = res {
+    }));
+    let Ok(mut ota) = ota else {
+        _ = write_response(
+            socket,
+            "500 Internal Server Error",
+            "text/plain",
+            b"ERROR:ota init\n",
+        )
+        .await;
+        return;
+    };
+    if let Err(e) = ota.ota_begin(size, crc) {
         log::warn!("Ota begin error: {e:?}");
-        return None;
+        _ = write_response(
+            socket,
+            "500 Internal Server Error",
+            "text/plain",
+            b"ERROR:ota begin\n",
+        )
+        .await;
+        return;
+    }
+
+    // close-delimited body, so progress can be streamed
+    if !write_all(
+        socket,
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n",
+    )
+    .await
+    {
+        return;
     }
 
     let mut ota_buffer = alloc::vec![0u8; 4096];
-    ota_buffer[..req.body.len()].copy_from_slice(req.body);
-    let mut buffer_pos = req.body.len();
+    let first = req.body.len().min(ota_buffer.len());
+    ota_buffer[..first].copy_from_slice(&req.body[..first]);
+    let mut buffer_pos = first;
     let mut total = 0;
 
-    loop {
-        match socket.read(&mut ota_buffer[buffer_pos..]).await {
-            Ok(0) => {
-                if buffer_pos > 0 {
-                    total += buffer_pos;
-                    log::info!("read body: {} (total: {}) - final chunk", buffer_pos, total);
-                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
-                    if res == Ok(true) {
-                        if ota.ota_flush(true, true).is_ok() {
-                            log::info!("OTA restart!");
-                            if !write_response(
-                                socket,
-                                "200 OK",
-                                "text/plain",
-                                b"OTA Update Successful. Restarting...",
-                            )
-                            .await
-                            {
-                                return None;
-                            }
-                            Timer::after(Duration::from_millis(100)).await;
-                            esp_hal::system::software_reset();
-                        } else {
-                            log::error!("OTA flash verify failed!");
-                        }
-                    }
-                }
-                break;
+    let result: &[u8] = loop {
+        let n = if buffer_pos == ota_buffer.len() || total + buffer_pos >= content_length {
+            0
+        } else {
+            match socket.read(&mut ota_buffer[buffer_pos..]).await {
+                Ok(0) | Err(_) => break b"ERROR:connection lost\n",
+                Ok(n) => n,
             }
-            Ok(n) => {
-                buffer_pos += n;
+        };
+        buffer_pos += n;
 
-                if buffer_pos == 4096 || total + buffer_pos >= content_length {
-                    total += buffer_pos;
-                    log::info!("read body: {} (total: {})", buffer_pos, total);
-
-                    let progress_msg = format!("PROGRESS:{},{}\n", total, content_length);
-                    _ = socket.write_all(progress_msg.as_bytes()).await;
-                    _ = socket.flush().await;
-
-                    let res = ota.ota_write_chunk(&ota_buffer[..buffer_pos]);
-                    if res == Ok(true) {
-                        if ota.ota_flush(true, true).is_ok() {
-                            log::info!("OTA restart!");
-                            let final_msg = "DONE:OTA Update Successful. Restarting...\n";
-                            _ = socket.write_all(final_msg.as_bytes()).await;
-                            _ = socket.flush().await;
-
-                            Timer::after(Duration::from_millis(100)).await;
-                            esp_hal::system::software_reset();
-                        } else {
-                            log::error!("OTA flash verify failed!");
-                        }
-                    }
-                    buffer_pos = 0;
-
-                    if total >= content_length {
-                        break;
-                    }
-                }
-            }
-            Err(_) => break,
+        if buffer_pos < ota_buffer.len() && total + buffer_pos < content_length {
+            continue;
         }
-    }
 
-    _ = write_response(socket, "200 OK", "text/html", b"Uploaded").await;
+        total += buffer_pos;
+        let mut progress: heapless::String<48> = heapless::String::new();
+        _ = core::fmt::write(
+            &mut progress,
+            format_args!("PROGRESS:{total},{content_length}\n"),
+        );
+        _ = write_all(socket, progress.as_bytes()).await;
 
-    Some(())
+        match ota.ota_write_chunk(&ota_buffer[..buffer_pos]) {
+            Ok(true) => {
+                if ota.ota_flush(true, true).is_ok() {
+                    log::info!("OTA restart!");
+                    _ = write_all(socket, b"DONE:OTA Update Successful. Restarting...\n").await;
+                    Timer::after(Duration::from_millis(100)).await;
+                    esp_hal::system::software_reset();
+                }
+
+                log::error!("OTA flash verify failed!");
+                break b"ERROR:verify failed\n";
+            }
+            Ok(false) => {}
+            Err(e) => {
+                log::error!("OTA write error: {e:?}");
+                break b"ERROR:write failed\n";
+            }
+        }
+
+        buffer_pos = 0;
+        if total >= content_length {
+            break b"ERROR:upload ended before image was complete\n";
+        }
+    };
+
+    _ = write_all(socket, result).await;
 }
 
 pub async fn run_http_server(
@@ -316,10 +321,10 @@ pub async fn run_http_server(
     ap_stack: Stack<'static>,
     signals: Rc<WmInnerSignals>,
     wifi_panel_str: &'static str,
-) {
-    for id in 0..WEB_TASK_POOL_SIZE {
-        spawner.spawn(
-            web_task(id, ap_stack, signals.clone(), wifi_panel_str).expect("Web task failed"),
-        );
+) -> crate::Result<()> {
+    for _ in 0..WEB_TASK_POOL_SIZE {
+        spawner.spawn(web_task(ap_stack, signals.clone(), wifi_panel_str)?);
     }
+
+    Ok(())
 }

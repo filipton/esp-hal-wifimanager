@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 
 pub type Result<T> = core::result::Result<T, WmError>;
 
+/// Max size of a setup json from the AP panel or BLE
+pub(crate) const MAX_SETUP_LEN: usize = 1024;
+pub(crate) type SetupData = heapless::Vec<u8, MAX_SETUP_LEN>;
+
 #[derive(Debug)]
 pub enum WmError {
     /// TODO: add connection timeout (time after which init_wm returns WmTimeout error
@@ -125,11 +129,15 @@ impl AutoSetupSettings {
     }
 
     pub fn to_station(&self) -> Result<StationConfig> {
+        let authentication = if self.psk.is_empty() {
+            AuthenticationMethodConfig::Open
+        } else {
+            AuthenticationMethodConfig::Wpa2Personal(self.psk.as_str().try_into()?)
+        };
+
         Ok(StationConfig::default()
             .with_ssid(self.ssid.as_str().try_into()?)
-            .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
-                self.psk.as_str().try_into()?,
-            )))
+            .with_authentication(authentication))
     }
 }
 
@@ -194,12 +202,12 @@ pub struct WmInnerSignals {
     pub wifi_scan_res: Mutex<NoopRawMutex, alloc::string::String>,
 
     /// This is used to tell main task to connect to wifi
-    pub wifi_conn_info_sig: Signal<NoopRawMutex, alloc::vec::Vec<u8>>,
+    pub wifi_conn_info_sig: Signal<NoopRawMutex, SetupData>,
 
     /// This is used to tell ble task about conn result (return signal)
     pub wifi_conn_res_sig: Signal<NoopRawMutex, bool>,
 
-    end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 16, 1>,
+    end_signal_pubsub: PubSubChannel<NoopRawMutex, (), 1, 16, 0>,
 }
 
 impl WmInnerSignals {
@@ -215,17 +223,19 @@ impl WmInnerSignals {
     /// Wait for end signal
     #[allow(dead_code)]
     pub async fn end_signalled(&self) {
-        self.end_signal_pubsub
-            .subscriber()
-            .expect("Shouldnt fail getting subscriber")
-            .next_message_pure()
-            .await;
+        match self.end_signal_pubsub.subscriber() {
+            Ok(mut sub) => sub.next_message_pure().await,
+            // all subscriber slots taken: never end rather than end immediately
+            Err(_) => {
+                log::error!("end signal: no free subscriber slot");
+                core::future::pending().await
+            }
+        }
     }
 
     pub fn signal_end(&self) {
         self.end_signal_pubsub
-            .publisher()
-            .expect("Shouldnt fail getting publisher")
+            .immediate_publisher()
             .publish_immediate(());
     }
 }

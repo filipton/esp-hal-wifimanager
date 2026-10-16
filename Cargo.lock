@@ -672,10 +672,35 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7a6f957c944e22c2c1904618863702e8af302953454ac738e6df0c7038c4d88"
 dependencies = [
+ "edge-nal",
  "edge-raw",
+ "embassy-futures",
+ "embassy-time",
  "heapless 0.9.3",
  "num_enum",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "edge-nal"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "590182a48668fa4988cd97b9b500bcc9a213e9b122b4e0008e934b3916c64031"
+dependencies = [
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "edge-nal-embassy"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "79ad23a63d41bdda528a3b725ae9119ce58abeea265b41fc7f8b254c8d07b2a2"
+dependencies = [
+ "edge-nal",
+ "embassy-futures",
+ "embassy-net",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -1107,21 +1132,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "esp-hal-dhcp-server"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cced67bda05f7109af8dba0d83c2625734a60c86319740b8bebdf83b1e2d20f1"
-dependencies = [
- "edge-dhcp",
- "embassy-futures",
- "embassy-net",
- "embassy-sync 0.8.0",
- "embassy-time",
- "heapless 0.9.3",
- "log",
-]
-
-[[package]]
 name = "esp-hal-ota"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1155,8 +1165,11 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-wifimanager"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
+ "edge-dhcp",
+ "edge-nal",
+ "edge-nal-embassy",
  "embassy-executor",
  "embassy-futures",
  "embassy-net",
@@ -1165,7 +1178,6 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-storage",
  "esp-hal",
- "esp-hal-dhcp-server",
  "esp-hal-ota",
  "esp-nvs",
  "esp-radio",
