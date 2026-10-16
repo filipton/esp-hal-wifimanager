@@ -3,7 +3,7 @@ use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
 
-const WEB_TASK_POOL_SIZE: usize = 2;
+const WEB_TASK_POOL_SIZE: usize = 3;
 const HTTP_BUFFER_SIZE: usize = 2048;
 const HTTP_HEADER_BUFFER_SIZE: usize = 192;
 
@@ -63,31 +63,36 @@ fn parse_http_request(buffer: &[u8]) -> Option<HttpRequest<'_>> {
     })
 }
 
+enum ReadError {
+    TooLarge,
+    /// the peer closed or stalled (socket timeout) before the whole request arrived
+    Incomplete,
+}
+
 /// Reads the head and, for requests other than the OTA upload (streamed later), the whole body.
-/// Returns the number of bytes in `buf`, or `None` when the request doesn't fit or the peer stalls
-/// (the socket timeout ends slow clients).
-async fn read_request(socket: &mut TcpSocket<'_>, buf: &mut [u8]) -> Option<usize> {
+/// Returns the number of bytes in `buf`; a request is only ever handled complete.
+async fn read_request(socket: &mut TcpSocket<'_>, buf: &mut [u8]) -> Result<usize, ReadError> {
     let mut total = 0;
     loop {
         if let Some(req) = parse_http_request(&buf[..total]) {
             if req.is("POST", "/update") {
-                return Some(total);
+                return Ok(total);
             }
 
             let head_len = total - req.body.len();
             let needed = head_len.saturating_add(req.content_length().unwrap_or(0));
             if total >= needed {
-                return Some(total);
+                return Ok(total);
             }
             if needed > buf.len() {
-                return None;
+                return Err(ReadError::TooLarge);
             }
         } else if total == buf.len() {
-            return None;
+            return Err(ReadError::TooLarge);
         }
 
         match socket.read(&mut buf[total..]).await {
-            Ok(0) | Err(_) => return (total > 0).then_some(total),
+            Ok(0) | Err(_) => return Err(ReadError::Incomplete),
             Ok(n) => total += n,
         }
     }
@@ -179,17 +184,45 @@ async fn handle_request(
         let scan_res = signals.wifi_scan_res.try_lock();
         let resp = scan_res.as_ref().map(|s| s.as_str()).unwrap_or_default();
         _ = write_response(socket, "200 OK", "text/plain", resp.as_bytes()).await;
+    } else if request.is("GET", "/status") {
+        let status = signals.status();
+        let mut body: heapless::String<32> = heapless::String::new();
+        _ = body.push_str(status.as_str());
+        if status == crate::structs::SetupStatus::Connected {
+            if let Some(ip) = signals.ip() {
+                _ = core::fmt::write(&mut body, format_args!(":{ip}"));
+            }
+        }
+        if write_response(socket, "200 OK", "text/plain", body.as_bytes()).await
+            && status == crate::structs::SetupStatus::Connected
+        {
+            signals.mark_connected_seen();
+        }
     } else if request.is("POST", "/setup") {
         let Ok(setup) = SetupData::from_slice(request.body) else {
             _ = write_response(socket, "413 Payload Too Large", "text/plain", b"Too large").await;
             return;
         };
 
+        // the panel polls `/status`; don't let it read the previous attempt's result
+        signals.set_status(crate::structs::SetupStatus::Connecting);
         signals.wifi_conn_info_sig.signal(setup);
         _ = write_response(socket, "200 OK", "text/plain", b".").await;
     } else if cfg!(feature = "ota") && request.is("POST", "/update") {
         #[cfg(feature = "ota")]
         handle_update_req(request, socket).await;
+    } else if request.method.eq_ignore_ascii_case("GET") {
+        // captive portal: OS connectivity checks (/generate_204, /hotspot-detect.html,
+        // /connecttest.txt, ...) and any other page get redirected to the panel, which makes
+        // phones and laptops open it by themselves
+        _ = write_response_enc(
+            socket,
+            "302 Found",
+            "text/plain",
+            "Location: http://192.168.4.1/\r\n",
+            b"",
+        )
+        .await;
     } else {
         _ = write_response(socket, "404 Not Found", "text/plain", b"Not Found").await;
     }
@@ -217,16 +250,18 @@ async fn web_task(
             }
 
             match read_request(&mut socket, &mut http_buffer).await {
-                Some(n) => match parse_http_request(&http_buffer[..n]) {
+                Ok(n) => match parse_http_request(&http_buffer[..n]) {
                     Some(req) => handle_request(req, signals, wifi_panel, &mut socket).await,
                     None => {
                         _ = write_response(&mut socket, "400 Bad Request", "text/plain", b"").await
                     }
                 },
-                None => {
+                Err(ReadError::TooLarge) => {
                     _ = write_response(&mut socket, "413 Payload Too Large", "text/plain", b"")
                         .await
                 }
+                // nothing to answer: the client is gone or stalled
+                Err(ReadError::Incomplete) => {}
             }
 
             socket.close();

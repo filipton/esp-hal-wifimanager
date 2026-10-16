@@ -1,7 +1,7 @@
 use crate::structs::WmInnerSignals;
 use core::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use edge_dhcp::server::{Server, ServerOptions};
-use edge_nal::UdpBind;
+use edge_nal::{UdpBind, UdpReceive, UdpSend};
 use edge_nal_embassy::{Udp, UdpBuffers};
 use embassy_futures::select::{select, Either};
 use embassy_net::{Runner, Stack};
@@ -49,6 +49,39 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: &'static WmInner
             Either::Second(()) => return,
         }
     }
+}
+
+/// Captive DNS: every A query is answered with the AP address, so any URL a client opens lands
+/// on the panel.
+#[embassy_executor::task]
+pub async fn run_dns_server(ap_stack: Stack<'static>, signals: &'static WmInnerSignals) {
+    let buffers = UdpBuffers::<1>::new();
+    let udp = Udp::new(ap_stack, &buffers);
+    let mut socket = match udp
+        .bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 53)))
+        .await
+    {
+        Ok(socket) => socket,
+        Err(e) => {
+            log::error!("dns server bind failed: {e:?}");
+            return;
+        }
+    };
+
+    let serve = async {
+        let mut query = [0; 512];
+        let mut reply = [0; 512];
+        loop {
+            let Ok((n, remote)) = socket.receive(&mut query).await else {
+                Timer::after_millis(100).await;
+                continue;
+            };
+            if let Some(len) = crate::dns::reply(&query[..n], &mut reply, AP_IP.octets()) {
+                _ = socket.send(remote, &reply[..len]).await;
+            }
+        }
+    };
+    select(serve, signals.end_signalled()).await;
 }
 
 #[embassy_executor::task]

@@ -493,10 +493,28 @@
                 });
             } catch (_) { }
 
-            connecting = false;
             if (listInterval) { clearInterval(listInterval); listInterval = null; }
-            showModal("Credentials sent! Reconnect to your access point in 10–15 seconds if WiFi doesn't connect automatically.");
+            showModal("Connecting to " + ssid + "...");
+            showModal(await waitForStatus());
+            connecting = false;
         });
+
+        // polls /status until the attempt ends; failed polls are retried, since the AP can
+        // drop clients briefly when it follows the station to the router's channel
+        async function waitForStatus() {
+            for (let i = 0; i < 40; i++) {
+                await new Promise((r) => setTimeout(r, 1000));
+                let status;
+                try { status = await (await fetch("/status")).text(); } catch (_) { continue; }
+                if (status.startsWith("connected")) {
+                    const ip = status.split(":")[1];
+                    return "Connected! The device is now online" + (ip ? " (" + ip + ")." : ".");
+                }
+                if (status === "failed:connect") return "Could not connect: wrong password or network not found.";
+                if (status === "failed:invalid") return "Invalid network settings.";
+            }
+            return "Credentials sent! Reconnect to your access point in 10–15 seconds if WiFi doesn't connect automatically.";
+        }
 
         // Delegate clicks on the list — avoids all inline quoting issues
         document.getElementById("list").addEventListener("click", (e) => {

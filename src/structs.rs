@@ -266,8 +266,40 @@ impl core::fmt::Debug for WifiManager {
     }
 }
 
+/// Outcome of the last setup attempt, shown by the AP panel (`GET /status`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub(crate) enum SetupStatus {
+    Idle = 0,
+    Connecting = 1,
+    Connected = 2,
+    /// setup json unparsable or rejected by the driver
+    Invalid = 3,
+    /// wrong password or network not found
+    Failed = 4,
+}
+
+impl SetupStatus {
+    #[cfg_attr(not(feature = "ap"), allow(dead_code))] // read by the AP panel only
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Connecting => "connecting",
+            Self::Connected => "connected",
+            Self::Invalid => "failed:invalid",
+            Self::Failed => "failed:connect",
+        }
+    }
+}
+
 pub(crate) struct WmInnerSignals {
     pub wifi_scan_res: Mutex<NoopRawMutex, heapless::String<SCAN_LIST_LEN>>,
+
+    status: portable_atomic::AtomicU8,
+    /// station address once connected (0 = none yet), shown by `/status`
+    ip: portable_atomic::AtomicU32,
+    /// the panel read `connected`, so the AP can go down
+    connected_seen: portable_atomic::AtomicBool,
 
     /// This is used to tell main task to connect to wifi
     pub wifi_conn_info_sig: Signal<NoopRawMutex, SetupData>,
@@ -282,6 +314,9 @@ impl WmInnerSignals {
     pub const fn new() -> Self {
         Self {
             wifi_scan_res: Mutex::new(heapless::String::new()),
+            status: portable_atomic::AtomicU8::new(SetupStatus::Idle as u8),
+            ip: portable_atomic::AtomicU32::new(0),
+            connected_seen: portable_atomic::AtomicBool::new(false),
             wifi_conn_info_sig: Signal::new(),
             wifi_conn_res_sig: Signal::new(),
             end_signal_pubsub: PubSubChannel::new(),
@@ -298,6 +333,43 @@ impl WmInnerSignals {
                 log::error!("end signal: no free subscriber slot");
                 core::future::pending().await
             }
+        }
+    }
+
+    pub fn set_status(&self, status: SetupStatus) {
+        self.status
+            .store(status as u8, portable_atomic::Ordering::Relaxed);
+    }
+
+    pub fn set_ip(&self, ip: Ipv4Addr) {
+        self.ip
+            .store(u32::from(ip), portable_atomic::Ordering::Relaxed);
+    }
+
+    #[cfg_attr(not(feature = "ap"), allow(dead_code))] // read by the AP panel only
+    pub fn ip(&self) -> Option<Ipv4Addr> {
+        let ip = self.ip.load(portable_atomic::Ordering::Relaxed);
+        (ip != 0).then(|| Ipv4Addr::from(ip))
+    }
+
+    #[cfg_attr(not(feature = "ap"), allow(dead_code))] // read by the AP panel only
+    pub fn mark_connected_seen(&self) {
+        self.connected_seen
+            .store(true, portable_atomic::Ordering::Relaxed);
+    }
+
+    pub fn connected_seen(&self) -> bool {
+        self.connected_seen.load(portable_atomic::Ordering::Relaxed)
+    }
+
+    #[cfg_attr(not(feature = "ap"), allow(dead_code))] // read by the AP panel only
+    pub fn status(&self) -> SetupStatus {
+        match self.status.load(portable_atomic::Ordering::Relaxed) {
+            1 => SetupStatus::Connecting,
+            2 => SetupStatus::Connected,
+            3 => SetupStatus::Invalid,
+            4 => SetupStatus::Failed,
+            _ => SetupStatus::Idle,
         }
     }
 

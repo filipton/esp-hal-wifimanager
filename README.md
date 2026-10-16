@@ -37,6 +37,33 @@ AP (`POST /setup`), BLE and `env` all take
 `{"ssid": "...", "psk": "...", "data": <any json>}`. An empty `psk` means an open network.
 `data` is handed to your app as raw json by `WifiManager::data()`.
 
+## AP provisioning
+- **Captive portal:** DHCP advertises the portal, a small DNS server answers every name with
+  the AP address, and any unknown page (e.g. `/generate_204`, `/hotspot-detect.html`,
+  `/connecttest.txt`) redirects to the panel, so phones and laptops open it by themselves.
+- **`GET /status`** reports the last setup attempt: `idle`, `connecting`, `connected:<ip>`,
+  `failed:connect` (wrong password / network not found) or `failed:invalid`. The AP stays up
+  while connecting, stays up after a failure (retry from the panel), and goes down shortly
+  after the panel has read `connected` (at most ~12 s). Custom panels can poll it like this:
+
+```js
+async function waitForStatus() {
+    for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        let s;
+        try { s = await (await fetch("/status")).text(); } catch (_) { continue; } // brief drops
+        if (s.startsWith("connected")) return "Connected " + (s.split(":")[1] || "");
+        if (s.startsWith("failed")) return s === "failed:connect" ? "Wrong password or network not found" : "Invalid settings";
+    }
+    return "No answer, reconnect to the AP and check the device";
+}
+```
+
+- **Short client drops:** while the station connects, the AP keeps running, but clients are
+  briefly disconnected and rejoin by themselves (the AP is re-applied together with the station
+  settings, and in AP+STA mode it must follow the router's channel). Poll `/status` with retries,
+  as above.
+
 ## Example
 ```toml
 [dependencies]

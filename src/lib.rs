@@ -16,12 +16,12 @@ use embassy_futures::select::{select, Either};
 use embassy_net::{Config, DhcpConfig, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{Interface, WifiController};
 use portable_atomic::{AtomicBool, Ordering};
 use static_cell::StaticCell;
-use structs::{Setup, SetupData, WmInnerSignals};
+use structs::{Setup, SetupData, SetupStatus, WmInnerSignals};
 
 pub use esp_nvs::Key;
 pub use include_minifier::include_minified;
@@ -45,6 +45,8 @@ pub use structs::{
 };
 pub use utils::get_efuse_mac;
 
+#[cfg(feature = "ap")]
+mod dns;
 #[cfg(feature = "ap")]
 mod http;
 
@@ -84,6 +86,24 @@ pub async fn init_wm(
     let ap_if = esp_radio::wifi::Interface::access_point();
     let mut controller = esp_radio::wifi::WifiController::new(wifi, Default::default())?;
     controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None)?;
+
+    let mut dhcp_config = DhcpConfig::default();
+    dhcp_config.hostname = Some(settings.ssid.clone());
+
+    let sta_config = Config::dhcpv4(dhcp_config);
+    let (sta_stack, runner) = embassy_net::new(
+        sta_if,
+        sta_config,
+        {
+            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
+                static_cell::StaticCell::new();
+            STATIC_CELL.uninit().write(StackResources::<3>::new())
+        },
+        rng.random() as u64,
+    );
+
+    // running from the start: provisioning reports the address before the AP goes down
+    spawner.spawn(sta_task(runner)?);
 
     let mut connected_setup = None;
     if let Some(nvs) = nvs {
@@ -133,9 +153,15 @@ pub async fn init_wm(
         #[cfg(feature = "ble")]
         spawner.spawn(bluetooth::bluetooth_task(bt, generated_ssid, wm_signals)?);
 
-        let wifi_setup =
-            wifi_connection_worker(&settings, wm_signals, nvs, &mut controller, configuration)
-                .await?;
+        let wifi_setup = wifi_connection_worker(
+            &settings,
+            wm_signals,
+            nvs,
+            &mut controller,
+            configuration,
+            &sta_stack,
+        )
+        .await?;
 
         controller.set_config(&Setup::parse(&wifi_setup)?.to_configuration()?)?;
         if settings.esp_restart_after_connection {
@@ -153,21 +179,6 @@ pub async fn init_wm(
             "Disconnect before connection task startup returned error (expected if not connected): {e:?}"
         );
     }
-
-    let mut dhcp_config = DhcpConfig::default();
-    dhcp_config.hostname = Some(settings.ssid.clone());
-
-    let sta_config = Config::dhcpv4(dhcp_config);
-    let (sta_stack, runner) = embassy_net::new(
-        sta_if,
-        sta_config,
-        {
-            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                static_cell::StaticCell::new();
-            STATIC_CELL.uninit().write(StackResources::<3>::new())
-        },
-        rng.random() as u64,
-    );
 
     if WIFI_CONTROLLER_ACTIVE
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -188,8 +199,6 @@ pub async fn init_wm(
             return Err(WmError::TaskSpawn);
         }
     }
-    spawner.spawn(sta_task(runner)?);
-
     Ok(WifiManager {
         stack: sta_stack,
         ip: utils::wifi_wait_for_ip(&sta_stack).await,
@@ -224,12 +233,17 @@ async fn wifi_connection_worker(
     nvs: Option<&Nvs>,
     controller: &mut WifiController<'static>,
     mut configuration: esp_radio::wifi::Config,
+    sta_stack: &embassy_net::Stack<'static>,
 ) -> Result<SetupData> {
     let start_time = Instant::now();
     let mut last_scan = Instant::MIN;
     loop {
         if wm_signals.wifi_conn_info_sig.signaled() {
             let setup_info_buf = wm_signals.wifi_conn_info_sig.wait().await;
+            wm_signals.set_status(SetupStatus::Connecting);
+
+            // a rejected config makes esp-radio stop wifi (AP included): keep one to restore
+            let last_good = configuration.clone();
 
             // setup comes from AP/BLE clients: a bad request must not stop the wifimanager
             match Setup::parse(&setup_info_buf).and_then(|setup| {
@@ -245,18 +259,41 @@ async fn wifi_connection_worker(
                 }
                 Err(e) => {
                     log::warn!("Invalid wifi setup received: {e}");
+                    wm_signals.set_status(SetupStatus::Invalid);
                     wm_signals.wifi_conn_res_sig.signal(false);
                     continue;
                 }
             }
 
-            let wifi_connected = match controller.set_config(&configuration) {
-                Ok(()) => utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await,
+            let (wifi_connected, status) = match controller.set_config(&configuration) {
+                Ok(()) => {
+                    match utils::try_to_wifi_connect(controller, settings.wifi_conn_timeout).await {
+                        true => (true, SetupStatus::Connected),
+                        false => (false, SetupStatus::Failed),
+                    }
+                }
                 Err(e) => {
                     log::warn!("Wifi setup rejected by driver: {e:?}");
-                    false
+                    if let Err(e) = controller.set_config(&last_good) {
+                        log::error!("Restoring the provisioning config failed: {e:?}");
+                    }
+                    configuration = last_good;
+                    (false, SetupStatus::Invalid)
                 }
             };
+            if wifi_connected {
+                // the panel shows the address; still connected without one, it just isn't shown
+                if let Ok(ip) =
+                    with_timeout(Duration::from_secs(10), utils::wifi_wait_for_ip(sta_stack)).await
+                {
+                    wm_signals.set_ip(ip);
+                }
+            } else {
+                // a timed-out connect keeps running in the driver, and the next set_config
+                // would fail while it does
+                _ = with_timeout(Duration::from_secs(2), controller.disconnect_async()).await;
+            }
+            wm_signals.set_status(status);
 
             wm_signals.wifi_conn_res_sig.signal(wifi_connected);
 
@@ -274,7 +311,12 @@ async fn wifi_connection_worker(
                     }
                 }
 
-                Timer::after_millis(1000).await;
+                // keep the AP up until the panel has shown `connected` (or 10 s pass)
+                let since = Instant::now();
+                while !wm_signals.connected_seen() && since.elapsed() < Duration::from_secs(10) {
+                    Timer::after_millis(100).await;
+                }
+                Timer::after_millis(2000).await;
                 wm_signals.signal_end();
                 return Ok(setup_info_buf);
             }

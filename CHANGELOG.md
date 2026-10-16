@@ -3,6 +3,21 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.1
+
+### Fixed
+- A request body cut short by the client or a stall is no longer handled as a setup.
+- After a failed connect attempt the next setup could make the driver reject the config, which
+  stopped wifi and took the provisioning AP down for good; the pending connect is now aborted and
+  a rejected config restores the AP.
+
+### Added
+- Captive portal: DNS server answering every name with the AP address, and redirects from OS
+  connectivity checks and unknown pages to the panel.
+- `GET /status` (`idle`, `connecting`, `connected:<ip>`, `failed:connect`, `failed:invalid`); the
+  built-in panel shows the result. The AP now stays up until the panel has read `connected`.
+- A third HTTP worker (fewer refused connections when several requests arrive at once).
+
 ## 0.6.0
 
 Breaking, see [MIGRATING.md](MIGRATING.md).
