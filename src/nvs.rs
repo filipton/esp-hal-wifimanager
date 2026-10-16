@@ -1,18 +1,57 @@
 use alloc::rc::Rc;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, mutex::Mutex};
-use embedded_storage::ReadStorage;
 use esp_nvs::{Get, Key, Set};
+use embedded_storage::nor_flash::{ErrorType, NorFlash, ReadNorFlash};
 use esp_storage::FlashStorage;
 use portable_atomic::AtomicU8;
 
 const PART_OFFSET: u32 = 0x8000;
 const PART_SIZE: u32 = 0xc00;
 
+/// esp-nvs platform: our own esp-storage + esp-hal ROM crc, so esp-nvs needs no chip feature
+/// (and doesn't pin its own esp-storage version).
+pub struct NvsFlash(FlashStorage<'static>);
+
+impl esp_nvs::platform::Crc for NvsFlash {
+    fn crc32(init: u32, data: &[u8]) -> u32 {
+        esp_hal::rom::crc::crc32_le(init, data)
+    }
+}
+
+impl ErrorType for NvsFlash {
+    type Error = <FlashStorage<'static> as ErrorType>::Error;
+}
+
+impl ReadNorFlash for NvsFlash {
+    const READ_SIZE: usize = FlashStorage::READ_SIZE;
+
+    fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        ReadNorFlash::read(&mut self.0, offset, bytes)
+    }
+
+    fn capacity(&self) -> usize {
+        ReadNorFlash::capacity(&self.0)
+    }
+}
+
+impl NorFlash for NvsFlash {
+    const WRITE_SIZE: usize = FlashStorage::WRITE_SIZE;
+    const ERASE_SIZE: usize = FlashStorage::ERASE_SIZE;
+
+    fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        NorFlash::erase(&mut self.0, from, to)
+    }
+
+    fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        NorFlash::write(&mut self.0, offset, bytes)
+    }
+}
+
 const WIFIMANAGER_NAMESPACE: Key = Key::from_str("wifimanager");
 static NVS_INSTANCES: AtomicU8 = AtomicU8::new(0);
 
 pub struct Nvs {
-    inner: Rc<Mutex<CriticalSectionRawMutex, esp_nvs::Nvs<FlashStorage<'static>>>>,
+    inner: Rc<Mutex<CriticalSectionRawMutex, esp_nvs::Nvs<NvsFlash>>>,
 
     offset: usize,
     size: usize,
@@ -48,7 +87,7 @@ impl Nvs {
             inner: Rc::new(Mutex::new(esp_nvs::Nvs::new(
                 flash_offset,
                 flash_size,
-                storage,
+                NvsFlash(storage),
             )?)),
 
             offset: flash_offset,
@@ -104,7 +143,7 @@ impl Nvs {
 
     pub async fn get<R>(&self, key: &str) -> crate::Result<R>
     where
-        esp_nvs::Nvs<FlashStorage<'static>>: Get<R>,
+        esp_nvs::Nvs<NvsFlash>: Get<R>,
     {
         let mut d = self.inner.lock().await;
         Ok(d.get(&WIFIMANAGER_NAMESPACE, &Key::from_str(key))?)
@@ -112,7 +151,7 @@ impl Nvs {
 
     pub async fn set<R>(&self, key: &str, value: R) -> crate::Result<()>
     where
-        esp_nvs::Nvs<FlashStorage<'static>>: Set<R>,
+        esp_nvs::Nvs<NvsFlash>: Set<R>,
     {
         let mut d = self.inner.lock().await;
         Ok(d.set(&WIFIMANAGER_NAMESPACE, &Key::from_str(key), value)?)

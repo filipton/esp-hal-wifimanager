@@ -25,27 +25,27 @@ cargo run --config "env.WM_CONN='{\"ssid\": \"ssid\", \"psk\": \"pass\", \"data\
 ## Simple example
 Add this to your Cargo.toml (note also add `embassy`, its only for async):
 
-NOTE: this section is not updated, will update it sometime near feature.
 ```toml
 [dependencies]
-esp-hal = { version = "1.0.0-rc.0", features = [ "esp32s3", "unstable" ] }
-esp-wifi = { version = "0.15.0", features = [ "esp32s3", "coex" ] }
-esp-hal-embassy = { version = "0.9.0", features = ["esp32s3"] }
+esp-hal = { version = "1.2.2", features = [ "esp32s3", "unstable" ] }
+esp-radio = { version = "1.0.0-beta.1", features = [ "esp32s3", "coex", "esp-alloc" ] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy", "esp-radio"] }
+esp-hal-wifimanager = { version = "0.4.0", default-features = false, features = ["esp32s3", "ap", "ble"] }
 ```
 
 Simple example (to see full example check `./examples` dir):
 ```rust
 // ...
-let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000).unwrap();
-let mut wm_settings = esp_hal_wifimanager::WmSettings::default();
-
 let timg0 = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG0);
+esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+
+let nvs = esp_hal_wifimanager::Nvs::new(0x9000, 0x6000, peripherals.FLASH).unwrap();
+let wm_settings = esp_hal_wifimanager::WmSettings::default();
+
 let wifi_res = esp_hal_wifimanager::init_wm(
     wm_settings,
     &spawner,
     Some(&nvs),
-    rng.clone(),
-    timg0.timer0,
     peripherals.WIFI,
     peripherals.BT, // only if ble feature is enabled
     None, // signal for ap/ble start

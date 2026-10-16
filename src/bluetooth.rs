@@ -5,7 +5,6 @@ use embassy_futures::select::Either::{First, Second};
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
 use esp_radio::ble::controller::BleConnector;
-use rand_core::OsRng;
 use trouble_host::{
     att::{AttClient, AttReq},
     prelude::*,
@@ -45,17 +44,13 @@ pub async fn bluetooth_task(bt: BT<'static>, name: String, signals: Rc<WmInnerSi
     );
     log::info!("[ble] address = {address:x?}");
 
-    let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
+    let mut resources: HostResources<_, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
         HostResources::new();
     let stack = trouble_host::new(controller, &mut resources)
         .set_random_address(address)
-        .set_random_generator_seed(&mut OsRng);
-
-    let Host {
-        mut peripheral,
-        runner,
-        ..
-    } = stack.build();
+        .build();
+    let runner = stack.runner();
+    let mut peripheral = stack.peripheral();
 
     let Ok(server) = Server::new_with_config(GapConfig::Peripheral(PeripheralConfig {
         name: &name,
@@ -133,7 +128,7 @@ async fn gatt_events_task<P: PacketPool>(
                     }
                     GattEvent::Write(e) => {
                         if e.handle() == server.wifi_service.setup_string.handle {
-                            acc.extend_from_slice(e.data());
+                            e.with_data(|_, data| acc.extend_from_slice(data));
                             if acc.last() == Some(&b'\0') {
                                 acc.pop();
                                 signals.wifi_conn_info_sig.signal(acc.clone());
@@ -192,7 +187,7 @@ async fn advertise<'values, 'server, C: Controller>(
     let len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[[0xf2, 0x54]]),
+            AdStructure::CompleteServiceUuids16(&[[0xf2, 0x54]]),
             AdStructure::CompleteLocalName(name.as_bytes()),
         ],
         &mut advertiser_data[..],

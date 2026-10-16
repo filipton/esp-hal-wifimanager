@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_features)] // impl_trait_in_assoc_type is only used when a dependent enables embassy-executor/nightly
 #![feature(impl_trait_in_assoc_type)]
 
 #[cfg(all(not(feature = "ble"), not(feature = "ap"), not(feature = "env")))]
@@ -92,7 +93,7 @@ pub async fn init_wm(
         #[cfg(feature = "ap")]
         let configuration = esp_radio::wifi::Config::AccessPointStation(
             Default::default(),
-            esp_radio::wifi::ap::AccessPointConfig::default().with_ssid(generated_ssid.clone()),
+            esp_radio::wifi::ap::AccessPointConfig::default().with_ssid(generated_ssid.as_str().try_into()?),
         );
 
         #[cfg(not(feature = "ap"))]

@@ -8,7 +8,7 @@ use embassy_sync::{
     pubsub::PubSubChannel,
     signal::Signal,
 };
-use esp_radio::wifi::{sta::StationConfig, Config, WifiError};
+use esp_radio::wifi::{sta::StationConfig, AuthenticationMethodConfig, Config, WifiError};
 use serde::{Deserialize, Serialize};
 
 pub type Result<T> = core::result::Result<T, WmError>;
@@ -126,8 +126,10 @@ impl AutoSetupSettings {
 
     pub fn to_station(&self) -> Result<StationConfig> {
         Ok(StationConfig::default()
-            .with_ssid(self.ssid.clone())
-            .with_password(self.psk.clone()))
+            .with_ssid(self.ssid.as_str().try_into()?)
+            .with_authentication(AuthenticationMethodConfig::Wpa2Personal(
+                self.psk.as_str().try_into()?,
+            )))
     }
 }
 
