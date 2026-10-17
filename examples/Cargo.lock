@@ -915,9 +915,9 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-ota"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "169b6da547c8dc76277919a420e8e969ffd9db9a704cfeaad086ccfaf879a6ea"
+checksum = "6978d1aeb37e6bf33dda15d98744b769ad140364f4fba02f6789ccf067c9666c"
 dependencies = [
  "embedded-storage",
  "esp-rom-sys",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-wifimanager"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "edge-dhcp",
  "edge-nal",
