@@ -134,6 +134,11 @@ pub struct WmSettings {
 
     /// Signalled when provisioning (AP/BLE) starts
     pub provisioning_signal: Option<&'static ProvisioningSignal>,
+
+    /// Wifi driver config, used at init and on every radio restart. Its dynamic RX/TX buffer
+    /// counts (32 each, ~1.6 KB per frame by default) bound how much heap a burst of frames
+    /// can take.
+    pub controller_config: esp_radio::wifi::ControllerConfig,
 }
 
 impl core::fmt::Debug for WmSettings {
@@ -150,6 +155,7 @@ impl core::fmt::Debug for WmSettings {
             )
             .field("wifi_conn_signal", &self.wifi_conn_signal.is_some())
             .field("provisioning_signal", &self.provisioning_signal.is_some())
+            .field("controller_config", &self.controller_config)
             .finish_non_exhaustive()
     }
 }
@@ -175,6 +181,8 @@ impl Default for WmSettings {
 
             wifi_conn_signal: None,
             provisioning_signal: None,
+
+            controller_config: Default::default(),
         }
     }
 }

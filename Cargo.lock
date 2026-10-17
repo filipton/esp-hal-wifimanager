@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "esp-hal-wifimanager"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "edge-dhcp",
  "edge-nal",

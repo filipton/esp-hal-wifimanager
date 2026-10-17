@@ -85,7 +85,8 @@ pub async fn init_wm(
     let sta_if = esp_radio::wifi::Interface::station();
     #[cfg(feature = "ap")]
     let ap_if = esp_radio::wifi::Interface::access_point();
-    let mut controller = esp_radio::wifi::WifiController::new(wifi, Default::default())?;
+    let mut controller =
+        esp_radio::wifi::WifiController::new(wifi, settings.controller_config.clone())?;
     controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None)?;
 
     let mut dhcp_config = DhcpConfig::default();
@@ -201,6 +202,7 @@ pub async fn init_wm(
         settings.wifi_reconnect_time,
         controller,
         wifi_configuration,
+        settings.controller_config,
         settings.wifi_conn_signal,
     );
     match connection_token {
@@ -372,6 +374,7 @@ async fn connection(
     reconnect_delay: Duration,
     controller: WifiController<'static>,
     configuration: esp_radio::wifi::Config,
+    controller_config: esp_radio::wifi::ControllerConfig,
     wifi_conn_signal: Option<&'static ConnSignal>,
 ) {
     let stop_signal = &RADIO_CMD;
@@ -387,7 +390,7 @@ async fn connection(
         let Some(ctrl) = controller.as_mut() else {
             // stopped: wait for `restart_radio` (false), ignore repeated stops
             while stop_signal.wait().await {}
-            controller = restart_controller(&configuration).await;
+            controller = restart_controller(&configuration, &controller_config).await;
             if controller.is_none() {
                 Timer::after(reconnect_delay).await;
                 stop_signal.signal(false); // retry the restart
@@ -444,6 +447,7 @@ async fn wait_or_stop(
 
 async fn restart_controller(
     configuration: &esp_radio::wifi::Config,
+    controller_config: &esp_radio::wifi::ControllerConfig,
 ) -> Option<WifiController<'static>> {
     if WIFI_CONTROLLER_ACTIVE
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -454,12 +458,13 @@ async fn restart_controller(
     }
 
     // SAFETY: the previous controller (the only WIFI owner) was dropped on stop
-    let res =
-        WifiController::new(unsafe { WIFI::steal() }, Default::default()).and_then(|mut c| {
+    let res = WifiController::new(unsafe { WIFI::steal() }, controller_config.clone()).and_then(
+        |mut c| {
             c.set_power_saving(esp_radio::wifi::PowerSaveMode::None)?;
             c.set_config(configuration)?;
             Ok(c)
-        });
+        },
+    );
 
     match res {
         Ok(c) => {

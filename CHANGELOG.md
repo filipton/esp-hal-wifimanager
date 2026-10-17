@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.4
+
+### Added
+- `WmSettings::controller_config`: the esp-radio `ControllerConfig` used at init and on every
+  radio restart (`restart_radio`). Lower its dynamic RX/TX buffer counts to bound the heap a burst
+  of frames can take (the defaults allow ~100 KB, e.g. right after a reconnect).
+
 ## 0.6.3
 
 ### Changed
