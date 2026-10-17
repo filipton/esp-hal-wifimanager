@@ -8,6 +8,9 @@ compile_error!("enable at least one feature (\"ble\", \"ap\", \"env\")!");
 #[cfg(all(feature = "ble", feature = "esp32s2"))]
 compile_error!("ESP32-S2 doesnt support BLE!");
 
+#[cfg(all(feature = "ble", feature = "esp32s31"))]
+compile_error!("esp-radio has no BLE for ESP32-S31 yet");
+
 extern crate alloc;
 use alloc::string::String;
 use core::ops::DerefMut;

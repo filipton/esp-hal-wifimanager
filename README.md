@@ -11,7 +11,8 @@ The setup is saved to NVS, and the connection is kept up (reconnects) in the bac
 - `ota` (default): firmware upload page (`/update`) on the access point
 - `env`: set up wifi from the `WM_CONN` env var at build time (quick testing)
 - `custom_panel`: don't embed the built-in panel (when you pass your own `wifi_panel`)
-- chip: exactly one of `esp32`, `esp32s2`, `esp32s3`, `esp32c2`, `esp32c3`, `esp32c6`
+- chip: exactly one of `esp32`, `esp32s2`, `esp32s3`, `esp32c2`, `esp32c3`, `esp32c5`, `esp32c6`,
+  `esp32c61`, `esp32s31`
 
 At least one of `ap`, `ble` or `env` is required.
 

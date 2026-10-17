@@ -3,6 +3,17 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.2
+
+### Added
+- ESP32-C5, ESP32-C61 and ESP32-S31 support (`esp32c5`, `esp32c61`, `esp32s31`; no BLE on ESP32-S31
+  yet, esp-radio doesn't support it).
+
+### Fixed
+- Spawning the BLE provisioning task took ~9 KB of the caller's stack (its 7.3 KB future was built
+  on the stack before moving into the task pool); its host resources and setup buffer now live in
+  statics, so the spawn needs ~3 KB.
+
 ## 0.6.1
 
 ### Fixed
