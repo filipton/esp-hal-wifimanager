@@ -3,6 +3,7 @@ use embassy_futures::select::select3;
 use embassy_time::Timer;
 use esp_hal::peripherals::BT;
 use esp_radio::ble::controller::BleConnector;
+use static_cell::StaticCell;
 use trouble_host::{
     att::{AttClient, AttReq},
     prelude::*,
@@ -75,6 +76,18 @@ impl SetupAccumulator {
     }
 }
 
+type Resources = HostResources<
+    ExternalController<BleConnector<'static>, 20>,
+    DefaultPacketPool,
+    CONNECTIONS_MAX,
+    L2CAP_CHANNELS_MAX,
+>;
+
+// Big state lives in statics, not in the task future: spawning a task builds its future on the
+// caller's stack before moving it into the task pool, so a big future is a big stack spike there.
+static RESOURCES: StaticCell<Resources> = StaticCell::new();
+static SETUP: StaticCell<SetupAccumulator> = StaticCell::new();
+
 #[embassy_executor::task]
 pub async fn bluetooth_task(bt: BT<'static>, name: Ssid, signals: &'static WmInnerSignals) {
     let Ok(connector) = BleConnector::new(bt, esp_radio::ble::Config::default()) else {
@@ -90,9 +103,13 @@ pub async fn bluetooth_task(bt: BT<'static>, name: Ssid, signals: &'static WmInn
     let address = Address::random(mac);
     log::info!("[ble] address = {address:x?}");
 
-    let mut resources: HostResources<_, DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
-        HostResources::new();
-    let stack = trouble_host::new(controller, &mut resources)
+    let (Some(resources), Some(setup)) = (RESOURCES.try_uninit(), SETUP.try_uninit()) else {
+        log::error!("[ble] task started twice");
+        return;
+    };
+    let resources = resources.write(HostResources::new());
+    let setup = setup.write(SetupAccumulator::default());
+    let stack = trouble_host::new(controller, resources)
         .set_random_address(address)
         .build();
     let mut runner = stack.runner();
@@ -118,7 +135,7 @@ pub async fn bluetooth_task(bt: BT<'static>, name: Ssid, signals: &'static WmInn
     let serve = async {
         loop {
             match advertise(&name, &mut peripheral, &server).await {
-                Ok(conn) => serve_connection(&server, &conn, signals).await,
+                Ok(conn) => serve_connection(&server, &conn, signals, setup).await,
                 Err(e) => {
                     log::error!("[ble] advertise error: {e:?}");
                     Timer::after_millis(ERROR_RETRY_MS).await;
@@ -135,9 +152,11 @@ async fn serve_connection<P: PacketPool>(
     server: &Server<'_>,
     conn: &GattConnection<'_, '_, P>,
     signals: &WmInnerSignals,
+    setup: &mut SetupAccumulator,
 ) {
     let setup_handle = server.wifi_service.setup_string.handle;
-    let mut setup = SetupAccumulator::default();
+    setup.data.clear();
+    setup.prepared.clear();
 
     loop {
         let event = match conn.next().await {
