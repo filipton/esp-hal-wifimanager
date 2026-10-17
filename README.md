@@ -131,6 +131,11 @@ async fn main(spawner: Spawner) {
 
 Upgrading from 0.4? See [MIGRATING.md](MIGRATING.md).
 
+## Heap
+Provisioning runs on the heap (~35 KB on top of what wifi needs) and is freed once a setup
+connects; nothing of it stays in static RAM. With `esp_restart_after_connection: true` a boot either
+provisions or runs normally, so the app can put its own big buffers on the heap and share that RAM.
+
 ## Heap on ESP32 (wifi + BLE coexistence)
 Coex needs more RAM than the main heap region has; add the reclaimed bootloader RAM:
 ```rust

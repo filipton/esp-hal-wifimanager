@@ -5,20 +5,21 @@ use esp_radio::wifi::WifiController;
 
 #[cfg(feature = "ap")]
 use {
-    crate::{structs::WmInnerSignals, Result},
-    embassy_executor::Spawner,
+    crate::structs::WmInnerSignals,
+    alloc::boxed::Box,
+    embassy_futures::join::join4,
     embassy_net::{Config, Ipv4Cidr, StackResources, StaticConfigV4},
     esp_radio::wifi::Interface,
 };
 
 #[cfg(feature = "ap")]
-pub async fn spawn_ap(
-    rng: &esp_hal::rng::Rng,
-    spawner: &Spawner,
-    wm_signals: &'static WmInnerSignals,
+/// AP stack, DHCP, DNS and web panel; everything is heap-allocated and freed when dropped.
+pub async fn run_ap(
+    seed: u64,
+    wm_signals: &WmInnerSignals,
     wifi_panel: crate::Panel,
     ap_interface: Interface,
-) -> Result<()> {
+) {
     let ap_ip = crate::ap::AP_IP;
     let ap_ip_config = Config::ipv4_static(StaticConfigV4 {
         address: Ipv4Cidr::new(ap_ip, 24),
@@ -26,21 +27,16 @@ pub async fn spawn_ap(
         dns_servers: Default::default(),
     });
 
-    let (ap_stack, ap_runner) = embassy_net::new(
-        ap_interface,
-        ap_ip_config,
-        {
-            static STATIC_CELL: static_cell::StaticCell<StackResources<6>> =
-                static_cell::StaticCell::new();
-            STATIC_CELL.uninit().write(StackResources::<6>::new())
-        },
-        rng.random() as u64,
-    );
+    let mut resources = Box::new(StackResources::<6>::new());
+    let (ap_stack, ap_runner) = embassy_net::new(ap_interface, ap_ip_config, &mut *resources, seed);
 
-    spawner.spawn(crate::ap::ap_task(ap_runner, wm_signals)?);
-    spawner.spawn(crate::ap::run_dhcp_server(ap_stack, wm_signals)?);
-    spawner.spawn(crate::ap::run_dns_server(ap_stack, wm_signals)?);
-    crate::http::run_http_server(spawner, ap_stack, wm_signals, wifi_panel).await
+    join4(
+        Box::pin(crate::ap::ap_task(ap_runner, wm_signals)),
+        Box::pin(crate::ap::run_dhcp_server(ap_stack, wm_signals)),
+        Box::pin(crate::ap::run_dns_server(ap_stack, wm_signals)),
+        crate::http::run_http_server(ap_stack, wm_signals, wifi_panel),
+    )
+    .await;
 }
 
 pub async fn try_to_wifi_connect(

@@ -23,7 +23,6 @@ use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{Interface, WifiController};
 use portable_atomic::{AtomicBool, Ordering};
-use static_cell::StaticCell;
 use structs::{Setup, SetupData, SetupStatus, WmInnerSignals};
 
 pub use esp_nvs::Key;
@@ -68,7 +67,6 @@ pub const WIFI_NVS_KEY: Key = Key::from_str("WIFI_SETUP");
 static WIFI_CONTROLLER_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// `true` = stop the radio, `false` = restart it (see [`WifiManager::stop_radio`])
 pub(crate) static RADIO_CMD: Signal<CriticalSectionRawMutex, bool> = Signal::new();
-static WM_SIGNALS: StaticCell<WmInnerSignals> = StaticCell::new();
 
 /// Connects to the saved wifi, or provisions it over AP/BLE (with the enabled features) until a
 /// setup connects, then keeps the connection up in a background task.
@@ -125,9 +123,8 @@ pub async fn init_wm(
     } else {
         log::info!("Starting wifimanager with ssid: {generated_ssid}");
 
-        let wm_signals: &'static WmInnerSignals = WM_SIGNALS
-            .try_init(WmInnerSignals::new())
-            .ok_or(WmError::AlreadyInitialized)?;
+        // provisioning state is on the heap and freed once a setup connects
+        let wm_signals = &*alloc::boxed::Box::new(WmInnerSignals::new());
         if let Some(signal) = settings.provisioning_signal {
             signal.signal(());
         }
@@ -145,7 +142,9 @@ pub async fn init_wm(
         controller.set_config(&configuration)?;
 
         #[cfg(feature = "ap")]
-        utils::spawn_ap(&rng, spawner, wm_signals, settings.wifi_panel, ap_if).await?;
+        let ap = utils::run_ap(rng.random() as u64, wm_signals, settings.wifi_panel, ap_if);
+        #[cfg(not(feature = "ap"))]
+        let ap = async {};
 
         #[cfg(feature = "env")]
         match structs::SetupData::from_slice(env!("WM_CONN").as_bytes()) {
@@ -154,17 +153,26 @@ pub async fn init_wm(
         }
 
         #[cfg(feature = "ble")]
-        spawner.spawn(bluetooth::bluetooth_task(bt, generated_ssid, wm_signals)?);
+        let ble = bluetooth::bluetooth_task(bt, generated_ssid, wm_signals);
+        #[cfg(not(feature = "ble"))]
+        let ble = async {};
 
-        let wifi_setup = wifi_connection_worker(
+        let provisioning = alloc::boxed::Box::pin(async {
+            embassy_futures::join::join(ap, ble).await;
+            core::future::pending::<core::convert::Infallible>().await
+        });
+        let worker = wifi_connection_worker(
             &settings,
             wm_signals,
             nvs,
             &mut controller,
             configuration,
             &sta_stack,
-        )
-        .await?;
+        );
+        let wifi_setup = match select(worker, provisioning).await {
+            Either::First(res) => res?,
+            Either::Second(never) => match never {},
+        };
 
         controller.set_config(&Setup::parse(&wifi_setup)?.to_configuration()?)?;
         if settings.esp_restart_after_connection {

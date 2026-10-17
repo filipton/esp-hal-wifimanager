@@ -3,6 +3,14 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 0.6.3
+
+### Changed
+- Provisioning (AP, DHCP, DNS, web panel, BLE) runs on the heap and is freed once a setup
+  connects, instead of keeping ~35 KB of static RAM for the whole uptime. Provisioning needs about
+  that much more heap; with `esp_restart_after_connection` the app can reuse it after a normal boot
+  (e.g. for its own buffers).
+
 ## 0.6.2
 
 ### Added

@@ -12,8 +12,7 @@ pub const AP_IP: Ipv4Addr = Ipv4Addr::new(192, 168, 4, 1);
 const DHCP_LEASES: usize = 16;
 
 /// DHCP for AP clients; the AP itself is their gateway, DNS and captive portal.
-#[embassy_executor::task]
-pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: &'static WmInnerSignals) {
+pub async fn run_dhcp_server(ap_stack: Stack<'_>, signals: &WmInnerSignals) {
     let buffers = UdpBuffers::<1>::new();
     let udp = Udp::new(ap_stack, &buffers);
     let mut socket = match udp
@@ -38,7 +37,7 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: &'static WmInner
     options.captive_url = Some("http://192.168.4.1");
     options.lease_duration_secs = 3600;
 
-    let mut buf = [0; 1500];
+    let mut buf = alloc::vec![0; 1500];
     loop {
         let run = edge_dhcp::io::server::run(&mut server, &options, &mut socket, &mut buf);
         match select(run, signals.end_signalled()).await {
@@ -53,8 +52,7 @@ pub async fn run_dhcp_server(ap_stack: Stack<'static>, signals: &'static WmInner
 
 /// Captive DNS: every A query is answered with the AP address, so any URL a client opens lands
 /// on the panel.
-#[embassy_executor::task]
-pub async fn run_dns_server(ap_stack: Stack<'static>, signals: &'static WmInnerSignals) {
+pub async fn run_dns_server(ap_stack: Stack<'_>, signals: &WmInnerSignals) {
     let buffers = UdpBuffers::<1>::new();
     let udp = Udp::new(ap_stack, &buffers);
     let mut socket = match udp
@@ -84,7 +82,6 @@ pub async fn run_dns_server(ap_stack: Stack<'static>, signals: &'static WmInnerS
     select(serve, signals.end_signalled()).await;
 }
 
-#[embassy_executor::task]
-pub async fn ap_task(mut runner: Runner<'static, Interface>, signals: &'static WmInnerSignals) {
+pub async fn ap_task(mut runner: Runner<'_, Interface>, signals: &WmInnerSignals) {
     select(runner.run(), signals.end_signalled()).await;
 }

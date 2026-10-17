@@ -1,9 +1,8 @@
 use crate::structs::{SetupData, WmInnerSignals};
-use embassy_executor::Spawner;
 use embassy_net::{tcp::TcpSocket, Stack};
 use embassy_time::{Duration, Timer};
 
-const WEB_TASK_POOL_SIZE: usize = 3;
+const WEB_TASKS: usize = 3;
 const HTTP_BUFFER_SIZE: usize = 2048;
 const HTTP_HEADER_BUFFER_SIZE: usize = 192;
 
@@ -228,12 +227,7 @@ async fn handle_request(
     }
 }
 
-#[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
-async fn web_task(
-    stack: Stack<'static>,
-    signals: &'static WmInnerSignals,
-    wifi_panel: crate::Panel,
-) {
+async fn web_task(stack: Stack<'_>, signals: &WmInnerSignals, wifi_panel: crate::Panel) {
     let fut = async {
         let mut rx_buffer = [0; 1024];
         let mut tx_buffer = [0; 1024];
@@ -388,14 +382,11 @@ async fn handle_update_req(req: HttpRequest<'_>, socket: &mut TcpSocket<'_>) {
 }
 
 pub async fn run_http_server(
-    spawner: &Spawner,
-    ap_stack: Stack<'static>,
-    signals: &'static WmInnerSignals,
+    ap_stack: Stack<'_>,
+    signals: &WmInnerSignals,
     wifi_panel: crate::Panel,
-) -> crate::Result<()> {
-    for _ in 0..WEB_TASK_POOL_SIZE {
-        spawner.spawn(web_task(ap_stack, signals, wifi_panel)?);
-    }
-
-    Ok(())
+) {
+    let tasks: [_; WEB_TASKS] =
+        core::array::from_fn(|_| alloc::boxed::Box::pin(web_task(ap_stack, signals, wifi_panel)));
+    embassy_futures::join::join_array(tasks).await;
 }
