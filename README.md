@@ -7,7 +7,8 @@ The setup is saved to NVS, and the connection is kept up (reconnects) in the bac
 
 ## Features
 - `ap` (default): access point with the setup panel (`/`), scan list (`/list`) and DHCP server
-- `ble` (default): BLE setup service (not on ESP32-S2)
+- `ble` (default): BLE setup service (not on ESP32-S2; on ESP32-S31 only with esp-radio's main branch, with internal RAM as the heap's
+  first region: the controller asserts on memory from PSRAM)
 - `ota` (default): firmware upload page (`/update`) on the access point
 - `env`: set up wifi from the `WM_CONN` env var at build time (quick testing)
 - `custom_panel`: don't embed the built-in panel (when you pass your own `wifi_panel`)

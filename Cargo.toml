@@ -15,7 +15,7 @@ targets = ["riscv32imc-unknown-none-elf"]
 [lib]
 
 [dependencies]
-esp-hal = { version = "1.2.2", default-features = false, features = ["unstable", "rt"] }
+esp-hal = { version = "1.2", default-features = false, features = ["unstable", "rt"] }
 esp-rtos = { version = "0.4.0", default-features = false, features = ["embassy"] }
 embassy-net = { version = "0.9.1", default-features = false, features = ["tcp", "dhcpv4", "dhcpv4-hostname", "medium-ethernet", "proto-ipv4"] }
 esp-radio = { version = "1.0.0-beta.1", default-features = false, features = [ "unstable", "wifi" ] }

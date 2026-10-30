@@ -65,10 +65,13 @@ pub struct Nvs {
 
 impl Nvs {
     /// Opens the `nvs` partition from the partition table.
-    pub fn new(mut flash: FLASH<'static>) -> crate::Result<&'static Self> {
-        let (offset, size) = Self::read_nvs_partition_offset(flash.reborrow())
-            .ok_or(WmError::NvsPartitionNotFound)?;
-        Self::new_at(offset, size, flash)
+    pub fn new(flash: FLASH<'static>) -> crate::Result<&'static Self> {
+        // One instance for both: a second one can detect a flash of 0 bytes after this one's ROM
+        // reads, which NVS refuses as `InvalidPartitionSize`.
+        let mut storage = FlashStorage::new(flash);
+        let (offset, size) =
+            Self::find_nvs_partition(&mut storage).ok_or(WmError::NvsPartitionNotFound)?;
+        Self::open(offset, size, storage)
     }
 
     /// Opens NVS at an explicit flash `offset` and `size`.
@@ -77,6 +80,14 @@ impl Nvs {
         size: usize,
         flash: FLASH<'static>,
     ) -> crate::Result<&'static Self> {
+        Self::open(offset, size, FlashStorage::new(flash))
+    }
+
+    fn open(
+        offset: usize,
+        size: usize,
+        storage: FlashStorage<'static>,
+    ) -> crate::Result<&'static Self> {
         if NVS_TAKEN
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
@@ -84,7 +95,7 @@ impl Nvs {
             return Err(WmError::NvsAlreadyInitialized);
         }
 
-        let nvs = match esp_nvs::Nvs::new(offset, size, NvsFlash(FlashStorage::new(flash))) {
+        let nvs = match esp_nvs::Nvs::new(offset, size, NvsFlash(storage)) {
             Ok(nvs) => nvs,
             Err(e) => {
                 NVS_TAKEN.store(false, Ordering::Release);
@@ -102,8 +113,10 @@ impl Nvs {
 
     /// `(offset, size)` of the `nvs` partition from the partition table.
     pub fn read_nvs_partition_offset(flash: FLASH<'_>) -> Option<(usize, usize)> {
-        let mut flash = FlashStorage::new(flash);
+        Self::find_nvs_partition(&mut FlashStorage::new(flash))
+    }
 
+    fn find_nvs_partition(flash: &mut FlashStorage<'_>) -> Option<(usize, usize)> {
         let mut bytes = [0xFF; 32];
         for read_offset in (0..PART_SIZE).step_by(32) {
             flash.read(PART_OFFSET + read_offset, &mut bytes).ok()?;

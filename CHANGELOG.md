@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+### Changed
+- `ble` on ESP32-S31: no longer refused here; it works with esp-radio's main branch, which has the
+  S31's BLE controller (the released esp-radio still refuses it). Tested on hardware: setup and the
+  scan list over BLE beside Wi-Fi. The heap's first region must be internal RAM.
+
+### Fixed
+- `Nvs::new`: `InvalidPartitionSize` on a valid partition. It read the partition table and opened
+  NVS with two `FlashStorage` instances, and the second can detect a flash of 0 bytes after the
+  first's ROM reads (seen on ESP32-S31 and ESP32-C3 v4); now one instance does both.
+
 ## 0.6.4
 
 ### Added
