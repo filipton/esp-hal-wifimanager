@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## Unreleased
 
+### Added
+- `init_wm_with`: `init_wm` on stack resources the app sizes, for apps that need more than the two
+  sockets `init_wm` leaves them.
+
 ### Changed
 - `ble` on ESP32-S31: no longer refused here; it works with esp-radio's main branch, which has the
   S31's BLE controller (the released esp-radio still refuses it). Tested on hardware: setup and the

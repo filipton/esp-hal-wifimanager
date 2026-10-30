@@ -76,6 +76,30 @@ pub async fn init_wm(
     wifi: WIFI<'static>,
     #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
 ) -> Result<WifiManager> {
+    static STATIC_CELL: static_cell::StaticCell<StackResources<3>> = static_cell::StaticCell::new();
+    let resources = STATIC_CELL.uninit().write(StackResources::<3>::new());
+    init_wm_with(
+        settings,
+        spawner,
+        nvs,
+        wifi,
+        #[cfg(feature = "ble")]
+        bt,
+        resources,
+    )
+    .await
+}
+
+/// [`init_wm`] on a station stack with `resources`' sockets: one goes to DHCP, the rest are the
+/// app's (`init_wm` leaves it two).
+pub async fn init_wm_with<const SOCKETS: usize>(
+    settings: WmSettings,
+    spawner: &Spawner,
+    nvs: Option<&Nvs>,
+    wifi: WIFI<'static>,
+    #[cfg(feature = "ble")] bt: esp_hal::peripherals::BT<'static>,
+    resources: &'static mut StackResources<SOCKETS>,
+) -> Result<WifiManager> {
     let rng = esp_hal::rng::Rng::new();
     let generated_ssid = settings.ssid.clone();
 
@@ -93,11 +117,7 @@ pub async fn init_wm(
     let (sta_stack, runner) = embassy_net::new(
         sta_if,
         sta_config,
-        {
-            static STATIC_CELL: static_cell::StaticCell<StackResources<3>> =
-                static_cell::StaticCell::new();
-            STATIC_CELL.uninit().write(StackResources::<3>::new())
-        },
+        resources,
         rng.random() as u64,
     );
 
