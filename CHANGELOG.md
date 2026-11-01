@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
+## 0.6.5
 
 ### Added
 - `init_wm_with`: `init_wm` on stack resources the app sizes, for apps that need more than the two
