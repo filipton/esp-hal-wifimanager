@@ -49,6 +49,16 @@ impl NorFlash for NvsFlash {
     }
 }
 
+/// The flash, set to park the other core of a dual-core chip for the moment each write or erase
+/// takes: both cores run their code from flash, which can't be read while it is written, so by
+/// default a write fails while the other core runs (an app that runs anything on it).
+fn storage(flash: FLASH<'static>) -> FlashStorage<'static> {
+    let storage = FlashStorage::new(flash);
+    #[cfg(any(feature = "esp32", feature = "esp32s3", feature = "esp32s31"))]
+    let storage = storage.multicore_auto_park();
+    storage
+}
+
 const WIFIMANAGER_NAMESPACE: Key = Key::from_str("wifimanager");
 
 /// Claimed while an instance is being created or exists (there can only be one)
@@ -68,7 +78,7 @@ impl Nvs {
     pub fn new(flash: FLASH<'static>) -> crate::Result<&'static Self> {
         // One instance for both: a second one can detect a flash of 0 bytes after this one's ROM
         // reads, which NVS refuses as `InvalidPartitionSize`.
-        let mut storage = FlashStorage::new(flash);
+        let mut storage = storage(flash);
         let (offset, size) =
             Self::find_nvs_partition(&mut storage).ok_or(WmError::NvsPartitionNotFound)?;
         Self::open(offset, size, storage)
@@ -80,7 +90,7 @@ impl Nvs {
         size: usize,
         flash: FLASH<'static>,
     ) -> crate::Result<&'static Self> {
-        Self::open(offset, size, FlashStorage::new(flash))
+        Self::open(offset, size, storage(flash))
     }
 
     fn open(

@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   scan list over BLE beside Wi-Fi. The heap's first region must be internal RAM.
 
 ### Fixed
+- NVS writes on dual-core chips (ESP32, ESP32-S3, ESP32-S31) failed with a flash error while the
+  app ran anything on the second core, so a setup could not be saved: the flash is now opened to
+  park the other core for the moment a write takes.
 - `Nvs::new`: `InvalidPartitionSize` on a valid partition. It read the partition table and opened
   NVS with two `FlashStorage` instances, and the second can detect a flash of 0 bytes after the
   first's ROM reads (seen on ESP32-S31 and ESP32-C3 v4); now one instance does both.
