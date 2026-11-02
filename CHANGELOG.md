@@ -3,7 +3,7 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## Unreleased
+## 0.6.6
 
 ### Fixed
 - BLE setup could be invisible to some scanners, macOS included: the raw MAC was used as the random
