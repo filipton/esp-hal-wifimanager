@@ -3,6 +3,13 @@
 All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## Unreleased
+
+### Fixed
+- BLE setup could be invisible to some scanners, macOS included: the raw MAC was used as the random
+  address, so its last byte decided the address type and could land on the reserved `10`. It is now
+  a valid static random address, with the MAC reversed into BLE byte order and the type bits set.
+
 ## 0.6.5
 
 ### Added

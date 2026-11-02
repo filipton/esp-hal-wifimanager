@@ -53,6 +53,8 @@ mod http;
 mod ap;
 
 #[cfg(feature = "ble")]
+mod ble_address;
+#[cfg(feature = "ble")]
 mod bluetooth;
 
 mod nvs;
