@@ -1,3 +1,4 @@
+use crate::ble_address::static_random_address;
 use crate::structs::{SetupData, Ssid, WmInnerSignals};
 use alloc::boxed::Box;
 use embassy_futures::select::select3;
@@ -95,7 +96,7 @@ pub async fn bluetooth_task(bt: BT<'static>, name: Ssid, signals: &WmInnerSignal
         log::error!("[ble] invalid mac address");
         return;
     };
-    let address = Address::random(mac);
+    let address = Address::random(static_random_address(mac));
     log::info!("[ble] address = {address:x?}");
 
     let mut resources: Box<Resources> = Box::new(HostResources::new());
