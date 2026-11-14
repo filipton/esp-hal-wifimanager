@@ -45,7 +45,8 @@ async fn main(spawner: Spawner) {
     log::info!("wifi_res: {wifi_res:?}");
 
     loop {
-        log::info!("bump {}", esp_hal::time::Instant::now());
+        let rssi = wifi_res.as_ref().ok().and_then(|wifi| wifi.rssi());
+        log::info!("bump {} rssi: {rssi:?}", esp_hal::time::Instant::now());
         Timer::after_millis(15000).await;
     }
 }

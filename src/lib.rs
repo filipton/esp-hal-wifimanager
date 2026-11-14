@@ -11,15 +11,16 @@ compile_error!("ESP32-S2 doesnt support BLE!");
 extern crate alloc;
 use alloc::string::String;
 use core::ops::DerefMut;
+use core::pin::pin;
 use embassy_executor::Spawner;
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select, select3, Either, Either3};
 use embassy_net::{Config, DhcpConfig, Runner, StackResources};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{with_timeout, Duration, Instant, Timer};
 use esp_hal::peripherals::WIFI;
 use esp_radio::wifi::{Interface, WifiController};
-use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicBool, AtomicI8, Ordering};
 use structs::{Setup, SetupData, SetupStatus, WmInnerSignals};
 
 pub use esp_nvs::Key;
@@ -66,6 +67,12 @@ pub const WIFI_NVS_KEY: Key = Key::from_str("WIFI_SETUP");
 static WIFI_CONTROLLER_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// `true` = stop the radio, `false` = restart it (see [`WifiManager::stop_radio`])
 pub(crate) static RADIO_CMD: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+/// Last sampled RSSI of the connected AP in dBm, [`RSSI_UNKNOWN`] while not connected
+/// (see [`WifiManager::rssi`])
+pub(crate) static STA_RSSI: AtomicI8 = AtomicI8::new(RSSI_UNKNOWN);
+/// [`STA_RSSI`] value while there is no reading
+pub(crate) const RSSI_UNKNOWN: i8 = i8::MIN;
+const RSSI_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Connects to the saved wifi, or provisions it over AP/BLE (with the enabled features) until a
 /// setup connects, then keeps the connection up in a background task.
@@ -398,6 +405,9 @@ async fn connection(
 ) {
     let stop_signal = &RADIO_CMD;
     let set_connected = |connected: bool| {
+        if !connected {
+            STA_RSSI.store(RSSI_UNKNOWN, Ordering::Relaxed);
+        }
         if let Some(sig) = wifi_conn_signal {
             sig.signal(connected);
         }
@@ -422,16 +432,23 @@ async fn connection(
                 log::info!("Wifi connected!");
                 set_connected(true);
 
-                // wait for disconnect or stop; restart requests while running are ignored
+                // one subscription for the whole connection, so no disconnect event slips by
+                // between RSSI samples
+                let mut disconnected = pin!(ctrl.wait_for_disconnect_async());
+
+                // wait for disconnect or stop, sampling RSSI meanwhile; restart requests while
+                // running are ignored
                 loop {
-                    match select(ctrl.wait_for_disconnect_async(), stop_signal.wait()).await {
-                        Either::First(info) => {
+                    sample_rssi(ctrl);
+                    let tick = Timer::after(RSSI_SAMPLE_INTERVAL);
+                    match select3(&mut disconnected, stop_signal.wait(), tick).await {
+                        Either3::First(info) => {
                             log::info!("Wifi disconnected: {info:?}");
                             set_connected(false);
                             break wait_or_stop(reconnect_delay, stop_signal).await;
                         }
-                        Either::Second(true) => break true,
-                        Either::Second(false) => {}
+                        Either3::Second(true) => break true,
+                        Either3::Second(false) | Either3::Third(()) => {}
                     }
                 }
             }
@@ -451,6 +468,19 @@ async fn connection(
             log::info!("WIFI controller stopped.");
         }
     }
+}
+
+/// Stores the connected AP's RSSI for [`WifiManager::rssi`], [`RSSI_UNKNOWN`] if it can't be read
+fn sample_rssi(ctrl: &WifiController<'static>) {
+    let rssi = match ctrl.rssi() {
+        // i8::MIN is the "unknown" marker, so a real reading never maps onto it
+        Ok(rssi) => rssi.clamp(i32::from(RSSI_UNKNOWN) + 1, i32::from(i8::MAX)) as i8,
+        Err(e) => {
+            log::debug!("Failed to read RSSI: {e:?}");
+            RSSI_UNKNOWN
+        }
+    };
+    STA_RSSI.store(rssi, Ordering::Relaxed);
 }
 
 /// Waits `delay`; returns true if a stop was requested meanwhile.

@@ -254,8 +254,20 @@ impl WifiManager {
         Setup::parse(&self.setup).ok()?.data
     }
 
+    /// Signal strength of the connected AP in dBm, sampled from its beacons every 2 s by the
+    /// connection task. `None` while disconnected, reconnecting or with the radio stopped.
+    pub fn rssi(&self) -> Option<i8> {
+        match crate::STA_RSSI.load(portable_atomic::Ordering::Relaxed) {
+            crate::RSSI_UNKNOWN => None,
+            rssi => Some(rssi),
+        }
+    }
+
     /// Disconnects from wifi and stops the radio
     pub fn stop_radio(&self) {
+        // cleared here too (not only once the connection task handles the stop), so `rssi()`
+        // is `None` as soon as this returns
+        crate::STA_RSSI.store(crate::RSSI_UNKNOWN, portable_atomic::Ordering::Relaxed);
         crate::RADIO_CMD.signal(true);
     }
 
